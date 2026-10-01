@@ -451,8 +451,7 @@ function openGalleryCarousel(albumName, photos) {
         ` : ''}
       </div>
       <div>
-        <strong style="color:white; font-size:1.1rem;">${photo.title || 'Untitled'}</strong>
-        <div style="font-size:0.85rem; color:rgba(255,255,255,0.6); margin-top:0.25rem;">Photo ${currentIndex + 1} of ${photos.length}</div>
+        <div style="font-size:0.9rem; color:rgba(255,255,255,0.7); margin-top:0.35rem; font-weight:500;">Photo ${currentIndex + 1} of ${photos.length}</div>
       </div>
     `;
 

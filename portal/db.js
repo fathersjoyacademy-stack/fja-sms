@@ -675,54 +675,64 @@ async function seedMockData() {
       }
     }
 
-    const notifications = await db.getAll("notifications");
-    if (notifications.length === 0) {
-      console.log("Seeding initial notifications...");
-      const seedNotifications = [
-        {
-          notification_id: "notif-1",
-          role: "Proprietor",
-          target_user_id: "",
-          title: "New Online Admission",
-          message: "Admission request submitted for John Mensah Jr. seeking Grade 5A.",
-          target_view: "admissions-intake",
-          status: "UNREAD",
-          created_at: new Date().toISOString()
-        },
-        {
-          notification_id: "notif-2",
-          role: "Proprietor",
-          target_user_id: "",
-          title: "Weekly Sectional Evaluation Report",
-          message: "New report submitted for the Pre-Primary section.",
-          target_view: "proprietor-dash",
-          status: "UNREAD",
-          created_at: new Date().toISOString()
-        }
-      ];
-      for (const n of seedNotifications) {
-        await db.put("notifications", n);
-      }
-    }
+    // Purge old demo notifications
+    try {
+      const n1 = await db.get("notifications", "notif-1");
+      if (n1) await db.delete("notifications", "notif-1");
+      const n2 = await db.get("notifications", "notif-2");
+      if (n2) await db.delete("notifications", "notif-2");
+    } catch (e) {}
 
     const calendars = await db.getAll("academic_calendar");
     if (calendars.length === 0) {
-      console.log("Seeding initial academic calendar...");
+      console.log("Seeding initial academic calendar for 2026/2027...");
       const seedCalendar = {
         calendar_id: "main-calendar",
-        term1_start: "2026-01-05",
-        term1_end: "2026-04-15",
-        term2_start: "2026-05-04",
-        term2_end: "2026-07-31",
-        term3_start: "2026-08-03",
-        term3_end: "2026-12-15",
-        midterm_start: "2026-10-12",
-        midterm_end: "2026-10-16",
-        exam_start: "2026-11-30",
-        exam_end: "2026-12-04",
-        pta_date: "2026-09-19"
+        academic_year: "2026/2027",
+        active_term: "Term 1",
+        term1_start: "2026-09-08",
+        term1_end: "2026-12-17",
+        term2_start: "2027-01-05",
+        term2_end: "2027-03-25",
+        term3_start: "2027-04-20",
+        term3_end: "2027-07-22",
+        previous_academic_year: "2025/2026",
+        prev_term1_start: "2025-09-02",
+        prev_term1_end: "2025-12-18",
+        prev_term2_start: "2026-01-08",
+        prev_term2_end: "2026-04-01",
+        prev_term3_start: "2026-04-21",
+        prev_term3_end: "2026-07-31",
+        midterm_start: "2026-10-19",
+        midterm_end: "2026-10-23",
+        exam_start: "2026-12-01",
+        exam_end: "2026-12-10",
+        pta_date: "2026-10-17"
       };
       await db.put("academic_calendar", seedCalendar);
+    } else {
+      // Ensure calendar is updated to 2026/2027 Term 1 with official dates
+      try {
+        const cal = await db.get("academic_calendar", "main-calendar");
+        if (cal && (!cal.academic_year || cal.academic_year === "2025/2026" || cal.term1_start !== "2026-09-08")) {
+          cal.academic_year = "2026/2027";
+          cal.active_term = "Term 1";
+          cal.term1_start = "2026-09-08";
+          cal.term1_end = "2026-12-17";
+          cal.term2_start = "2027-01-05";
+          cal.term2_end = "2027-03-25";
+          cal.term3_start = "2027-04-20";
+          cal.term3_end = "2027-07-22";
+          cal.previous_academic_year = "2025/2026";
+          cal.prev_term1_start = "2025-09-02";
+          cal.prev_term1_end = "2025-12-18";
+          cal.prev_term2_start = "2026-01-08";
+          cal.prev_term2_end = "2026-04-01";
+          cal.prev_term3_start = "2026-04-21";
+          cal.prev_term3_end = "2026-07-31";
+          await db.put("academic_calendar", cal);
+        }
+      } catch (calUpErr) {}
     }
 
     const questionnaires = await db.getAll("questionnaires");
@@ -823,6 +833,112 @@ async function seedMockData() {
       for (const a of seedArchives) {
         await db.put("broadcast_archives", a);
       }
+    }
+
+    // Auto-promote 2025/2026 enrolled students to 2026/2027 class progression ladder
+    try {
+      const promotionLadder = {
+        "c-creche": { nextId: "c-nursery1", nextName: "Nursery 1" },
+        "c-nursery1": { nextId: "c-nursery2", nextName: "Nursery 2" },
+        "c-nursery2": { nextId: "c-kg1", nextName: "KG 1" },
+        "c-kg1": { nextId: "c-kg2", nextName: "KG 2" },
+        "c-kg2": { nextId: "c-primary1", nextName: "Primary 1" },
+        "c-primary1": { nextId: "c-primary2", nextName: "Primary 2" },
+        "c-primary2": { nextId: "c-primary3", nextName: "Primary 3" },
+        "c-primary3": { nextId: "c-primary4", nextName: "Primary 4" },
+        "c-primary4": { nextId: "c-primary5", nextName: "Primary 5" },
+        "c-primary5": { nextId: "c-primary6", nextName: "Primary 6" },
+        "c-primary6": { nextId: "c-jhs1", nextName: "JHS 1" },
+        "c-jhs1": { nextId: "c-jhs2", nextName: "JHS 2" },
+        "c-jhs2": { nextId: "c-jhs3", nextName: "JHS 3" },
+        "c-jhs3": { nextId: "c-alumni", nextName: "Graduated (Alumni)" }
+      };
+
+      // Ensure alumni class exists
+      const alumniClass = await db.get("classes", "c-alumni");
+      if (!alumniClass) {
+        await db.put("classes", { class_id: "c-alumni", class_name: "Graduated (Alumni)", class_teacher_id: "", academic_year: "2026/2027" });
+      }
+
+      const existingClasses = await db.getAll("classes");
+      const classMap = new Map(existingClasses.map(c => [c.class_id, c.class_name]));
+      const allEnrolments = await db.getAll("enrolments");
+      const allProfiles = await db.getAll("profiles");
+      const allUsers = await db.getAll("users");
+      const studentUsers = allUsers.filter(u => u.role === "Student");
+      const studentUserIds = new Set(studentUsers.map(u => u.user_id));
+
+      let needsPromotion = false;
+      for (const enr of allEnrolments) {
+        if (studentUserIds.has(enr.student_id) && (!enr.academic_year || enr.academic_year === "2025/2026" || !enr.promoted_2026_2027)) {
+          needsPromotion = true;
+          break;
+        }
+      }
+
+      if (needsPromotion) {
+        console.log("Applying academic progression promotion for 2026/2027 session...");
+        for (const enr of allEnrolments) {
+          if (!studentUserIds.has(enr.student_id)) continue;
+          if (enr.promoted_2026_2027) continue;
+
+          const oldClassId = enr.class_id;
+          const oldClassName = classMap.get(oldClassId) || oldClassId;
+          const target = promotionLadder[oldClassId];
+
+          if (target) {
+            // Find student profile to attach history
+            const prof = allProfiles.find(p => p.user_id === enr.student_id);
+            if (prof) {
+              prof.previous_class_id = oldClassId;
+              prof.previous_class_name = oldClassName;
+              prof.current_class_id = target.nextId;
+              prof.current_class_name = target.nextName;
+              
+              const historyEntry = {
+                academic_year: "2025/2026",
+                class_id: oldClassId,
+                class_name: oldClassName,
+                attendance_rate: prof.cummulative_attendance ? (String(prof.cummulative_attendance).includes("%") ? prof.cummulative_attendance : `${prof.cummulative_attendance}%`) : "N/A",
+                academic_average: prof.cummulative_academic_score ? (String(prof.cummulative_academic_score).includes("%") ? prof.cummulative_academic_score : `${prof.cummulative_academic_score}%`) : "N/A",
+                status: target.nextId === "c-alumni" ? "GRADUATED" : `PROMOTED to ${target.nextName}`,
+                terms: [
+                  { term: "1st Term", dates: "02/09/2025 - 18/12/2025" },
+                  { term: "2nd Term", dates: "08/01/2026 - 01/04/2026" },
+                  { term: "3rd Term", dates: "21/04/2026 - 31/07/2026" }
+                ]
+              };
+              
+              let existingHist = [];
+              try {
+                if (prof.academic_history) {
+                  existingHist = typeof prof.academic_history === "string" ? JSON.parse(prof.academic_history) : prof.academic_history;
+                }
+              } catch(e) {}
+              if (!Array.isArray(existingHist)) existingHist = [];
+              if (!existingHist.some(h => h.academic_year === "2025/2026")) {
+                existingHist.push(historyEntry);
+              }
+              prof.academic_history = JSON.stringify(existingHist);
+              prof.updated_at = new Date().toISOString();
+              await db.put("profiles", prof);
+            }
+
+            // Update enrolment to promoted class for 2026/2027
+            enr.class_id = target.nextId;
+            enr.academic_year = "2026/2027";
+            enr.previous_class_id = oldClassId;
+            enr.status = target.nextId === "c-alumni" ? "GRADUATED" : "ACTIVE";
+            enr.enrolled_at = "2026-09-08";
+            enr.promoted_2026_2027 = true;
+            enr.updated_at = new Date().toISOString();
+            await db.put("enrolments", enr);
+          }
+        }
+        console.log("✓ All students successfully promoted to 2026/2027 session!");
+      }
+    } catch (promErr) {
+      console.warn("Promotion auto-migration notice:", promErr);
     }
   } catch (err) {
     console.warn("Error seeding upgraded stores:", err);
@@ -979,7 +1095,10 @@ async function seedMockData() {
   ];
 
   for (const c of seedCMS) {
-    await db.put("cms_content", c);
+    const existing = await db.get("cms_content", c.content_key);
+    if (!existing) {
+      await db.put("cms_content", c);
+    }
   }
 
   // --- Seed Subjects ---

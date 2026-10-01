@@ -54,7 +54,7 @@ const api = {
 
           const termObj = {
             termName: activeTerm,
-            academicYear: cal.academic_year || "2025/2026",
+            academicYear: cal.academic_year || "2026/2027",
             termNumber: termNum,
             startDate,
             endDate,
@@ -68,20 +68,20 @@ const api = {
     } catch (e) {
       console.warn("getCurrentTerm error:", e);
     }
-    const fallbackName = window.currentTermName || "Term 3";
+    const fallbackName = window.currentTermName || "Term 1";
     return {
       termName: fallbackName,
-      academicYear: "2025/2026",
+      academicYear: "2026/2027",
       termNumber: fallbackName === "Term 1" ? 1 : fallbackName === "Term 2" ? 2 : 3,
-      startDate: "2026-05-04",
-      endDate: "2026-08-07",
+      startDate: "2026-09-08",
+      endDate: "2026-12-17",
       isVacation: false,
       rawCalendar: null
     };
   },
 
   getCurrentTermName() {
-    return window.currentTermName || "Term 3";
+    return window.currentTermName || "Term 1";
   },
 
   async setActiveTerm(termName, academicYear) {
@@ -2345,6 +2345,52 @@ const api = {
       return true;
     } catch (e) {
       console.error("markAllNotificationsAsRead error:", e);
+      return false;
+    }
+  },
+
+  async deleteNotification(notificationId) {
+    if (!window.db || !notificationId) return false;
+    try {
+      await window.db.delete("notifications", notificationId);
+      if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+        try {
+          firebase.firestore().collection("notifications").doc(notificationId).delete();
+        } catch (e) {}
+      }
+      if (typeof window.dbSyncUpdate === "function") {
+        window.dbSyncUpdate("notifications");
+      }
+      return true;
+    } catch (e) {
+      console.error("deleteNotification error:", e);
+      return false;
+    }
+  },
+
+  async clearAllNotifications(userId, role) {
+    if (!window.db) return false;
+    try {
+      const allNotifs = await window.db.getAll("notifications") || [];
+      const targets = allNotifs.filter(n => {
+        if (n.target_user_id === userId) return true;
+        if (!n.target_user_id && (n.role === role || n.role === "All" || !n.role)) return true;
+        return false;
+      });
+      for (const n of targets) {
+        await window.db.delete("notifications", n.notification_id);
+        if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+          try {
+            firebase.firestore().collection("notifications").doc(n.notification_id).delete();
+          } catch (e) {}
+        }
+      }
+      if (typeof window.dbSyncUpdate === "function") {
+        window.dbSyncUpdate("notifications");
+      }
+      return true;
+    } catch (e) {
+      console.error("clearAllNotifications error:", e);
       return false;
     }
   }

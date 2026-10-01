@@ -3759,45 +3759,79 @@ async function renderWebsiteCMS(container) {
         return;
       }
 
+      window._cmsAlbumCollapsedState = window._cmsAlbumCollapsedState || {};
+      const collapsedState = window._cmsAlbumCollapsedState;
+
       container.style.display = "flex";
       container.style.flexDirection = "column";
       container.style.gap = "1.25rem";
 
-      container.innerHTML = Object.keys(albums).map(albName => `
-        <div style="width: 100%; border: 1px solid var(--border-color); border-radius: 10px; padding: 1rem; background: var(--bg-card);">
-          <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-            <div>
-              <strong style="color: var(--accent-secondary); font-size: 0.95rem;">📁 ${albName}</strong>
-              <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem;">(${albums[albName].length} photo${albums[albName].length === 1 ? '' : 's'})</span>
+      container.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; padding-bottom:0.25rem;">
+          <span style="font-size:0.85rem; color:var(--text-secondary);">${Object.keys(albums).length} Album${Object.keys(albums).length === 1 ? '' : 's'} Available</span>
+          <div style="display:flex; gap:0.4rem;">
+            <button id="btn-collapse-all-albums" class="btn btn-secondary" style="min-height:28px; font-size:0.75rem; padding:0 0.6rem;">▲ Collapse All</button>
+            <button id="btn-expand-all-albums" class="btn btn-secondary" style="min-height:28px; font-size:0.75rem; padding:0 0.6rem;">▼ Expand All</button>
+          </div>
+        </div>
+      ` + Object.keys(albums).map(albName => {
+        const isCollapsed = !!collapsedState[albName];
+        return `
+        <div class="cms-album-card" style="width: 100%; border: 1px solid var(--border-color); border-radius: 10px; padding: 0.85rem 1rem; background: var(--bg-card); transition: all 0.2s;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; ${isCollapsed ? '' : 'border-bottom: 1px solid var(--border-color); padding-bottom: 0.6rem; margin-bottom: 0.75rem;'}">
+            <div class="cms-album-header-toggle" data-album="${escapeHTML(albName)}" style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem; user-select: none;">
+              <span style="font-size: 0.85rem; color: var(--accent-primary);">${isCollapsed ? '▶' : '▼'}</span>
+              <strong style="color: var(--accent-secondary); font-size: 0.95rem;">📁 ${escapeHTML(albName)}</strong>
+              <span class="badge badge-info" style="font-size: 0.75rem; padding: 2px 7px;">${albums[albName].length} photo${albums[albName].length === 1 ? '' : 's'}</span>
             </div>
-            <div style="display: flex; gap: 0.4rem;">
-              <button class="btn btn-secondary btn-rename-album" data-album="${albName}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem; display:flex; align-items:center; gap:0.25rem;">
+            <div style="display: flex; gap: 0.4rem; align-items: center;">
+              <button class="btn btn-secondary btn-toggle-album-collapse" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem;">
+                ${isCollapsed ? 'Show Photos' : 'Hide Photos'}
+              </button>
+              <button class="btn btn-secondary btn-rename-album" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem; display:flex; align-items:center; gap:0.25rem;">
                 <span>✏️</span> Rename
               </button>
-              <button class="btn btn-secondary btn-delete-album" data-album="${albName}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem; color: var(--accent-danger); display:flex; align-items:center; gap:0.25rem;">
+              <button class="btn btn-secondary btn-delete-album" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem; color: var(--accent-danger); display:flex; align-items:center; gap:0.25rem;">
                 <span>🗑️</span> Delete Album
               </button>
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 0.6rem;">
+          <div class="cms-album-photo-grid" style="display: ${isCollapsed ? 'none' : 'grid'}; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem;">
             ${albums[albName].map(obj => `
-              <div style="position:relative; aspect-ratio:1; border-radius:6px; overflow:hidden; border:1px solid var(--border-color); background:var(--bg-primary);">
-                <img src="${obj.item.url}" style="width:100%; height:100%; object-fit:cover;">
-                <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.75); color:white; font-size:10px; padding:3px 4px; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                  ${obj.item.title || "Photo"}
-                </div>
+              <div style="position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; border:1px solid var(--border-color); background:#0f172a; display:flex; align-items:center; justify-content:center;">
+                <img src="${obj.item.url}" style="width:100%; height:100%; object-fit:contain; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'">
                 
                 <!-- Card Action Controls -->
-                <div style="position:absolute; top:3px; right:3px; display:flex; gap:3px;">
-                  <button class="btn-edit-cms-photo" data-index="${obj.idx}" title="Edit Photo & Album" style="background:rgba(14,165,233,0.9); border:none; border-radius:4px; color:white; width:22px; height:22px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✏️</button>
-                  <button class="btn-delete-cms-photo" data-index="${obj.idx}" title="Delete Photo" style="background:rgba(239,68,68,0.9); border:none; border-radius:4px; color:white; width:22px; height:22px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+                <div style="position:absolute; top:4px; right:4px; display:flex; gap:4px; z-index:2;">
+                  <button class="btn-edit-cms-photo" data-index="${obj.idx}" title="Edit Photo & Album" style="background:rgba(14,165,233,0.9); border:none; border-radius:4px; color:white; width:24px; height:24px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✏️</button>
+                  <button class="btn-delete-cms-photo" data-index="${obj.idx}" title="Delete Photo" style="background:rgba(239,68,68,0.9); border:none; border-radius:4px; color:white; width:24px; height:24px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
                 </div>
               </div>
             `).join("")}
           </div>
         </div>
-      `).join("");
+        `;
+      }).join("");
+
+      // Toggle album collapse
+      container.querySelectorAll(".btn-toggle-album-collapse, .cms-album-header-toggle").forEach(el => {
+        el.addEventListener("click", () => {
+          const alb = el.getAttribute("data-album");
+          collapsedState[alb] = !collapsedState[alb];
+          renderCMSThumbnails();
+        });
+      });
+
+      document.getElementById("btn-collapse-all-albums")?.addEventListener("click", () => {
+        Object.keys(albums).forEach(a => collapsedState[a] = true);
+        renderCMSThumbnails();
+      });
+
+      document.getElementById("btn-expand-all-albums")?.addEventListener("click", () => {
+        Object.keys(albums).forEach(a => collapsedState[a] = false);
+        renderCMSThumbnails();
+      });
 
       // Single photo deletion
       container.querySelectorAll(".btn-delete-cms-photo").forEach(btn => {
@@ -3947,7 +3981,7 @@ async function renderWebsiteCMS(container) {
 
     renderCMSThumbnails();
 
-    function compressImage(file) {
+    function compressImage(file, maxDimension = 900, quality = 0.8) {
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -3955,22 +3989,21 @@ async function renderWebsiteCMS(container) {
           img.onload = () => {
             const canvas = document.createElement("canvas");
             const ctx = canvas.getContext("2d");
-            const maxW = 400;
-            const maxH = 300;
             let w = img.width;
             let h = img.height;
-            if (w > maxW) {
-              h *= maxW / w;
-              w = maxW;
-            }
-            if (h > maxH) {
-              h *= maxH / h;
-              w = maxH;
+            if (w > maxDimension || h > maxDimension) {
+              if (w >= h) {
+                h = Math.round((h * maxDimension) / w);
+                w = maxDimension;
+              } else {
+                w = Math.round((w * maxDimension) / h);
+                h = maxDimension;
+              }
             }
             canvas.width = w;
             canvas.height = h;
             ctx.drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.7));
+            resolve(canvas.toDataURL("image/jpeg", quality));
           };
           img.src = e.target.result;
         };
@@ -14580,6 +14613,8 @@ async function renderRecordsManagement(container) {
             if (pPanels[key]) pPanels[key].classList.remove("portal-hidden");
           });
         }
+        const gridCont = document.getElementById("profile-modal-grid-container");
+        if (gridCont) gridCont.scrollTop = 0;
       }
 
       pTabBtns.forEach(btn => {
@@ -14594,6 +14629,8 @@ async function renderRecordsManagement(container) {
       profileModal.scrollTop = 0;
       const modalBox = document.getElementById("profile-detail-modal-box");
       if (modalBox) modalBox.scrollTop = 0;
+      const gridContainer = document.getElementById("profile-modal-grid-container");
+      if (gridContainer) gridContainer.scrollTop = 0;
     }
 
     document.getElementById("btn-close-profile-modal").onclick = () => {
@@ -19287,6 +19324,14 @@ async function renderNotificationsPortal(container) {
     const user = window.api.getCurrentUser();
     if (!user) return;
 
+    // Auto-purge any stale demo notifications
+    try {
+      const n1 = await window.db.get("notifications", "notif-1");
+      if (n1) await window.api.deleteNotification("notif-1");
+      const n2 = await window.db.get("notifications", "notif-2");
+      if (n2) await window.api.deleteNotification("notif-2");
+    } catch (e) {}
+
     const notifData = await window.api.getNotificationsForUser(user);
     const allUsers = await window.db.getAll("users") || [];
     const myNotifs = notifData.notifications;
@@ -19300,7 +19345,10 @@ async function renderNotificationsPortal(container) {
             <p style="color:var(--text-secondary);">Stay updated with real-time alerts, pending approvals, and incoming internal messages.</p>
           </div>
           ${myNotifs.length > 0 ? `
-            <button id="btn-mark-all-read" class="btn btn-secondary" style="min-height:38px;">Mark All as Read</button>
+            <div style="display:flex; gap:0.5rem;">
+              <button id="btn-mark-all-read" class="btn btn-secondary" style="min-height:38px;">Mark All as Read</button>
+              <button id="btn-clear-all-notifs" class="btn btn-secondary" style="min-height:38px; color:var(--accent-danger); border-color:var(--accent-danger);">🗑️ Clear All</button>
+            </div>
           ` : ''}
         </div>
 
@@ -19387,6 +19435,7 @@ async function renderNotificationsPortal(container) {
               ${!isRead ? `
                 <button class="btn btn-primary btn-notif-read" data-id="${n.notification_id}" style="min-height:30px; font-size:0.75rem; padding:0 0.5rem; background:var(--accent-success); border-color:var(--accent-success);">Mark Read</button>
               ` : ''}
+              <button class="btn btn-secondary btn-notif-delete" data-id="${n.notification_id}" title="Delete notification" style="min-height:30px; font-size:0.75rem; padding:0 0.5rem; color:var(--accent-danger); border-color:var(--accent-danger);">🗑️</button>
             </div>
           </div>
         `;
@@ -19398,6 +19447,18 @@ async function renderNotificationsPortal(container) {
           await window.api.markNotificationAsRead(nid, user.user_id);
           await updateNotificationBadge();
           renderList();
+        });
+      });
+
+      listContainer.querySelectorAll(".btn-notif-delete").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const nid = btn.getAttribute("data-id");
+          if (confirm("Delete this notification?")) {
+            await window.api.deleteNotification(nid);
+            await updateNotificationBadge();
+            renderList();
+            showToast("Notification deleted.", "info");
+          }
         });
       });
 
@@ -19429,6 +19490,18 @@ async function renderNotificationsPortal(container) {
         await updateNotificationBadge();
         renderList();
         showToast("All notifications marked as read.", "success");
+      });
+    }
+
+    const clearAllBtn = document.getElementById("btn-clear-all-notifs");
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener("click", async () => {
+        if (confirm("Are you sure you want to delete all notifications from your inbox?")) {
+          await window.api.clearAllNotifications(user.user_id, user.role);
+          await updateNotificationBadge();
+          renderList();
+          showToast("All notifications deleted successfully.", "success");
+        }
       });
     }
 
