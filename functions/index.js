@@ -61,8 +61,8 @@ function dispatchHubtelSMS(phone, message) {
       res.on("end", () => {
         try {
           const parsed = JSON.parse(data);
-          // Hubtel Status Code 0 = Success
-          const isSuccess = res.statusCode === 200 && parsed.status === 0;
+          // Hubtel Status Code 0 = Success (HTTP status can be 200 or 201 Created)
+          const isSuccess = (res.statusCode === 200 || res.statusCode === 201) && parsed.status === 0;
           resolve({
             success: isSuccess,
             status: parsed.status,
