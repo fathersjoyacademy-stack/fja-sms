@@ -18496,9 +18496,14 @@ document.addEventListener("DOMContentLoaded", async () => {
             window.api.setCurrentUser(freshUser);
             await enterDashboardPortal();
             return;
+          } else {
+            localStorage.removeItem("fja_session_token");
+            localStorage.removeItem("fja_session_user");
           }
         } catch (sessionErr) {
           console.warn("Could not restore session from storage:", sessionErr);
+          localStorage.removeItem("fja_session_token");
+          localStorage.removeItem("fja_session_user");
         }
       }
     }

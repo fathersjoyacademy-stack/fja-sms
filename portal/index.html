@@ -51,7 +51,7 @@
       <form id="form-portal-login" style="display:flex; flex-direction:column; gap:1.25rem;">
         <div class="form-group">
           <label class="form-label">Unique UID or Phone Number</label>
-          <input type="text" id="login-uid" class="form-control" placeholder="e.g. FJS20260001 or 0244112233" required>
+          <input type="text" id="login-uid" class="form-control" placeholder="e.g. PR20260001 or Phone" required>
         </div>
         <div class="form-group">
           <label class="form-label">Password</label>
@@ -69,16 +69,11 @@
         <button type="button" id="btn-back-to-site" class="btn btn-secondary" style="width:100%">Back to Website</button>
       </form>
 
-      <!-- Quick-Access Demo Accounts Section -->
+      <!-- Quick-Access Proprietor Login -->
       <div style="margin-top:2.5rem; border-top:1px dashed var(--border-color); padding-top:1.5rem;">
-        <p style="text-align:center; font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem; font-weight:600;">QUICK-ACCESS PORTAL DEMOS</p>
-        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.5rem;">
-          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="PR20260001" data-pwd="proprietor123" style="min-height:38px; font-size:0.8rem;">Proprietor</button>
-          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="HT20260001" data-pwd="headteacher123" style="min-height:38px; font-size:0.8rem;">Head Teacher</button>
-          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="FA20260001" data-pwd="finance123" style="min-height:38px; font-size:0.8rem;">Finance Officer</button>
-          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="AD20260001" data-pwd="admin123" style="min-height:38px; font-size:0.8rem;">School Admin</button>
-          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="FJT20260001" data-pwd="teacher123" style="min-height:38px; font-size:0.8rem;">Teacher (Creche)</button>
-          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="FJS20260001" data-pwd="student123" style="min-height:38px; font-size:0.8rem; grid-column: span 2;">Student / Parent</button>
+        <p style="text-align:center; font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem; font-weight:600;">ACTIVE SYSTEM ACCESS</p>
+        <div>
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="PR20260001" data-pwd="proprietor123" style="width:100%; min-height:38px; font-size:0.85rem;">Quick Sign-In (Proprietor)</button>
         </div>
       </div>
     </div>

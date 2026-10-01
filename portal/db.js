@@ -1,16 +1,50 @@
 // db.js - IndexedDB Engine & Seeding System
 
 const DB_NAME = "SchoolManagementDB";
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 let dbInstance = null;
 
-// Initializer function
-function initDB() {
-  return new Promise((resolve, reject) => {
-    if (dbInstance) {
-      return resolve(dbInstance);
-    }
+// Clean-slate synchronization barrier (Forces client browsers to wipe stale demo IndexedDB & sessions)
+const CLEAN_SLATE_EPOCH = "2026-10-01-clean-slate-v1";
 
+async function checkCleanSlateEpoch() {
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fja_clean_slate_epoch") !== CLEAN_SLATE_EPOCH) {
+    console.log("Clean slate epoch mismatch detected. Purging local storage and stale IndexedDB...");
+    localStorage.setItem("fja_clean_slate_epoch", CLEAN_SLATE_EPOCH);
+    localStorage.removeItem("fja_session_token");
+    localStorage.removeItem("fja_session_user");
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith("fja_last_sync_") || k.startsWith("fja_last_view_")) {
+        localStorage.removeItem(k);
+      }
+    });
+    if (typeof indexedDB !== "undefined") {
+      if (dbInstance) {
+        try { dbInstance.close(); } catch (e) {}
+        dbInstance = null;
+      }
+      await new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase(DB_NAME);
+        req.onsuccess = () => {
+          console.log("Stale local IndexedDB deleted successfully.");
+          resolve();
+        };
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+    }
+  }
+}
+
+// Initializer function
+async function initDB() {
+  if (dbInstance) {
+    return dbInstance;
+  }
+
+  await checkCleanSlateEpoch();
+
+  return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = (e) => {
