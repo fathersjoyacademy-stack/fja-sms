@@ -1,4 +1,4 @@
-const CACHE_NAME = "school-mgt-v34";
+const CACHE_NAME = "school-mgt-v35";
 const applicationServerPublicKey = "BAtYvIhzrg3wFs8S6Zt-G6MEbOyUNiZ8lkD5rtf__BWLVZFcraDmmBD4qN1knxkQLf_PRxhuJxnIoiXWfNRq7As";
 const ASSETS_TO_CACHE = [
   "./",

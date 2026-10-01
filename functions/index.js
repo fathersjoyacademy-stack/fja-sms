@@ -256,7 +256,7 @@ async function executeDailyBirthdayScan(db, options = {}) {
   }
 
   // Optional custom template from Firestore settings
-  let defaultTemplate = "Happy Birthday, #name#! Father's Joy Academy wishes you a blessed day of growth and excellence!";
+  let defaultTemplate = "Happy Birthday, #student_name#! Father's Joy Academy wishes you a blessed day of growth and excellence!";
   try {
     const tplDoc = await db.collection("settings").doc("sms_templates").get();
     if (tplDoc.exists && tplDoc.data().birthday_message) {
