@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Father's Joy Academy</title>
+  <link rel="stylesheet" href="./index.css">
+</head>
+<body>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- PUBLIC LANDING PAGE VIEW -->
+  <div class="landing-page">
+    <header class="landing-header">
+      <div class="sidebar-brand" style="margin-bottom:0">
+        <img src="./assets/logo.png" alt="Father's Joy Academy" style="width:32px; height:32px; object-fit:contain; margin-right:0.4rem; display:inline-block; vertical-align:middle;">
+        <span id="cms-nav-school-name">Father's Joy Academy</span>
+      </div>
+      <div class="landing-header-right">
+        <nav class="landing-nav">
+          <a href="#about">About</a>
+          <a href="#gallery">Gallery</a>
+          <a href="#news">News</a>
+          <a href="#admissions">Admissions</a>
+        </nav>
+        <div class="landing-header-actions">
+          <button id="btn-theme-toggle-public" class="btn-icon">🌓</button>
+          <button id="btn-portal-enter" class="btn btn-primary" style="min-height:38px">Portal Login</button>
+          <button id="btn-mobile-menu-toggle" class="btn-icon mobile-only-flex" aria-label="Toggle Navigation">☰</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Mobile Glassmorphic Fullscreen Menu Overlay -->
+    <div id="landing-mobile-menu" class="landing-mobile-menu portal-hidden">
+      <div class="mobile-menu-panel">
+        <div class="mobile-menu-header">
+          <div class="sidebar-brand" style="margin-bottom:0">
+            <img src="./assets/logo.png" alt="Father's Joy Academy" style="width:30px; height:30px; object-fit:contain; margin-right:0.4rem; display:inline-block; vertical-align:middle;">
+            <span style="font-size:1.1rem; color:var(--accent-primary);">Father's Joy Academy</span>
+          </div>
+          <button id="btn-mobile-menu-close" class="btn-icon" aria-label="Close Navigation">✕</button>
+        </div>
+        <div class="mobile-menu-links">
+          <a href="#about" class="mobile-menu-link">About Us</a>
+          <a href="#gallery" class="mobile-menu-link">Photo Gallery</a>
+          <a href="#news" class="mobile-menu-link">Latest Announcements</a>
+          <a href="#admissions" class="mobile-menu-link">Admissions Intake</a>
+          <a href="#events-calendar" class="mobile-menu-link">Academic Calendar</a>
+          <div class="mobile-menu-actions" style="margin-top:2rem; display:flex; flex-direction:column; gap:0.75rem;">
+            <button id="btn-theme-toggle-mobile" class="btn btn-secondary" style="width:100%;">🌓 Toggle Theme</button>
+            <button id="btn-portal-enter-mobile" class="btn btn-primary" style="width:100%;">Portal Login</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hero Area -->
+    <section class="hero-section">
+      <h1 id="cms-hero-title" class="hero-title">Nurturing Excellence, Inspiring Leadership</h1>
+      <p id="cms-hero-subtitle" class="hero-subtitle">A progressive Christian institution committed to producing holistic, tech-literate global citizens.</p>
+      <div style="display:flex; gap:1rem;">
+        <a href="#admissions" class="btn btn-primary">Apply Now</a>
+        <a href="#about" class="btn btn-secondary">Learn More</a>
+      </div>
+    </section>
+
+    <!-- About Section -->
+    <section id="about" class="landing-container">
+      <h2 class="section-title">Our Vision & Mission</h2>
+      <div class="grid-2">
+        <div class="value-card">
+          <h3 style="color:var(--accent-primary); margin-bottom:1rem;">Our Mission</h3>
+          <p id="cms-mission-text">To provide quality, child-centered education that empowers students to discover their creative capabilities and build sound ethical values.</p>
+        </div>
+        <div class="value-card">
+          <h3 style="color:var(--accent-secondary); margin-bottom:1rem;">Our Vision</h3>
+          <p id="cms-vision-text">To be a premier learning institution of choice, molding leaders who blend academic excellence, ethical integrity, and technological innovation.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:4rem">
+        <h3 style="text-align:center; margin-bottom:2rem;">Our Core Values</h3>
+        <div id="cms-values-container" class="values-grid">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Gallery Section -->
+    <section id="gallery" class="landing-container" style="background:var(--bg-secondary);">
+      <h2 class="section-title">Photo Gallery</h2>
+      <div id="cms-gallery-container" class="gallery-grid">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- News Section -->
+    <section id="news" class="landing-container">
+      <h2 class="section-title">Latest Announcements</h2>
+      <div id="cms-news-container" class="news-timeline">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- Leadership Section -->
+    <section class="landing-container" style="background:var(--bg-secondary)">
+      <h2 class="section-title">Leadership Team</h2>
+      <div id="cms-leadership-container" class="values-grid">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- Admissions Section -->
+    <section id="admissions" class="landing-container">
+      <h2 class="section-title" id="admissions-toggle" style="cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.5rem; user-select:none;">
+        <span>Admissions Intake Application</span> <span id="admissions-arrow" style="font-size: 1.2rem; transition: transform 0.3s; transform: rotate(0deg);">▼</span>
+      </h2>
+      <div class="admissions-box portal-hidden" id="admissions-form-container" style="transition: max-height 0.3s ease-out; overflow: hidden;">
+        <form id="form-public-admission" style="display:flex; flex-direction:column; gap:1.25rem;">
+          <h4 style="margin:0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary);">1. Child's Personal Profile</h4>
+          <div class="grid-3">
+            <div class="form-group">
+              <label class="form-label">Child's First Name *</label>
+              <input type="text" id="adm-child-first-name" class="form-control" placeholder="e.g. Emmanuel" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Other Name(s)</label>
+              <input type="text" id="adm-child-other-name" class="form-control" placeholder="e.g. Kwesi">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Child's Surname *</label>
+              <input type="text" id="adm-child-surname" class="form-control" placeholder="e.g. Mensah" required>
+            </div>
+          </div>
+          <div class="grid-3">
+            <div class="form-group">
+              <label class="form-label">Gender *</label>
+              <select id="adm-child-gender" class="form-control" required>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date of Birth *</label>
+              <input type="date" id="adm-child-dob" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Seeking Admission Into Class *</label>
+              <select id="adm-class" class="form-control" required>
+                <option value="Creche">Creche</option>
+                <option value="Nursery 1">Nursery 1</option>
+                <option value="Nursery 2">Nursery 2</option>
+                <option value="KG 1">KG 1</option>
+                <option value="KG 2">KG 2</option>
+                <option value="Primary 1">Primary 1</option>
+                <option value="Primary 2">Primary 2</option>
+                <option value="Primary 3">Primary 3</option>
+                <option value="Primary 4">Primary 4</option>
+                <option value="Primary 5">Primary 5</option>
+                <option value="Primary 6">Primary 6</option>
+                <option value="JHS 1">JHS 1</option>
+                <option value="JHS 2">JHS 2</option>
+                <option value="JHS 3">JHS 3</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label">Primary Contact Number *</label>
+              <input type="tel" id="adm-primary-phone" class="form-control" placeholder="e.g. 0244123456" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Primary Residential Address *</label>
+              <input type="text" id="adm-primary-address" class="form-control" placeholder="e.g. House No. 12, Dome Pillar 2, Accra" required>
+            </div>
+          </div>
+
+          <h4 style="margin:0.5rem 0 0 0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary);">2. Father's Details</h4>
+          <div class="grid-3">
+            <div class="form-group">
+              <label class="form-label">Father's Full Name</label>
+              <input type="text" id="adm-father-name" class="form-control" placeholder="e.g. Joseph Mensah">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Father's Occupation</label>
+              <input type="text" id="adm-father-occupation" class="form-control" placeholder="e.g. Civil Engineer">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Father's Contact Number</label>
+              <input type="tel" id="adm-father-phone" class="form-control" placeholder="e.g. 0244123456">
+            </div>
+          </div>
+
+          <h4 style="margin:0.5rem 0 0 0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary);">3. Mother's Details</h4>
+          <div class="grid-3">
+            <div class="form-group">
+              <label class="form-label">Mother's Full Name</label>
+              <input type="text" id="adm-mother-name" class="form-control" placeholder="e.g. Grace Mensah">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mother's Occupation</label>
+              <input type="text" id="adm-mother-occupation" class="form-control" placeholder="e.g. Accountant">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mother's Contact Number</label>
+              <input type="tel" id="adm-mother-phone" class="form-control" placeholder="e.g. 0208123456">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Additional Comments / Medical Disclosures</label>
+            <textarea id="adm-comments" class="form-control" style="min-height:80px" placeholder="Any special needs, dietary notes, or remarks..."></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">Submit Application</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Events & Calendar Section -->
+    <section id="events-calendar" class="landing-container">
+      <h2 class="section-title">Academic Calendar & School Events</h2>
+      <div class="admissions-box" style="padding: 2rem;">
+        <div id="website-calendar-events-container">
+          <p style="text-align:center; color:var(--text-muted);">Loading calendar and event dates...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer style="background:var(--bg-secondary); border-top:1px solid var(--border-color); text-align:center; padding:2.5rem 1rem; color:var(--text-muted)">
+      <p style="font-weight:800; font-size:1.1rem; color:var(--text-primary); margin:0 0 0.25rem 0; letter-spacing:0.5px; text-transform:uppercase;">FATHER'S JOY ACADEMY</p>
+      <p style="margin:0 0 0.25rem 0; font-weight:600; color:var(--text-secondary); font-size:0.9rem;">ABURA DUNKWA, C/R - GHANA.</p>
+      <p style="margin:0 0 1rem 0; font-weight:600; color:var(--accent-primary); font-size:0.9rem;">0242321696 / 0509706080</p>
+      <p style="margin:0; font-size:0.8rem;">&copy; 2026 Father's Joy Academy. All Rights Reserved. Powered by Offline-First PWA.</p>
+    </footer>
+  </div>
+
+  <!-- GALLERY ALBUM CAROUSEL POPUP -->
+  <div id="gallery-carousel-modal" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); backdrop-filter:blur(10px); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:30000; padding:2rem; color:white;">
+    <button id="btn-close-gallery-carousel" class="btn-icon" style="position:absolute; top:1.5rem; right:1.5rem; color:white; border-color:rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); cursor:pointer;">✕</button>
+    <div id="gallery-carousel-body" style="display:flex; flex-direction:column; align-items:center; text-align:center; gap:1.5rem; width:100%; max-width:800px; justify-content:center;">
+      <!-- Carousel images and buttons -->
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="../portal/firebase-config.js"></script>
+  <script src="../portal/db.js"></script>
+  <script src="../portal/api.js"></script>
+  <script src="./website.js"></script>
+
+</body>
+</html>

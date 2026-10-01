@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Father's Joy Academy - Portal</title>
+  <!-- Design styling and PWA definitions -->
+  <link rel="stylesheet" href="./index.css">
+  <link rel="manifest" href="./manifest.json">
+  <!-- Chart.js for data visualization panels -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- DEDICATED ISOLATED PRINT ROOT CONTAINER (Rendered exclusively during print) -->
+  <div id="print-root" class="print-only"></div>
+
+  <!-- GLOBAL SOFT WATERMARK -->
+  <div class="portal-global-watermark" aria-hidden="true"></div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- UNIFIED PORTAL LOGIN PANEL (Visible by default) -->
+  <div id="view-login" class="landing-page" style="justify-content:center; align-items:center; min-height: 100vh;">
+    <div class="admissions-box" style="width:100%; max-width:480px; padding:2.5rem; position:relative; z-index:1;">
+      <div style="text-align:center; margin-bottom:2rem;">
+        <img src="./assets/logo.png" alt="Father's Joy Academy" style="width:68px; height:68px; object-fit:contain; margin:0 auto 0.75rem; display:block; filter:drop-shadow(0 2px 8px rgba(0,0,0,0.25));">
+        <h2 style="margin-top:0.5rem; font-family:var(--font-family-display);">Portal Login</h2>
+        <p style="color:var(--text-secondary); font-size:0.9rem; margin-top:0.25rem;">Enter credentials to access your dashboard</p>
+      </div>
+
+      <!-- Password Reset Forced Form (Hidden by default) -->
+      <form id="form-forced-reset" class="portal-hidden" style="display:flex; flex-direction:column; gap:1.25rem;">
+        <div class="form-group">
+          <label class="form-label">Temporary Password Activated. Enforce Reset.</label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input type="password" id="reset-new-password" class="form-control" placeholder="New Secure Password" required style="padding-right:2.75rem;">
+            <button type="button" class="btn-toggle-password" data-target="reset-new-password" style="position:absolute; right:0.75rem; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:0.25rem; display:flex; align-items:center; justify-content:center; transition:color 0.2s; outline:none;" title="Toggle Password Visibility" aria-label="Toggle Password Visibility">
+              <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Save New Password</button>
+      </form>
+
+      <!-- Standard Login Form -->
+      <form id="form-portal-login" style="display:flex; flex-direction:column; gap:1.25rem;">
+        <div class="form-group">
+          <label class="form-label">Unique UID or Phone Number</label>
+          <input type="text" id="login-uid" class="form-control" placeholder="e.g. FJS20260001 or 0244112233" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input type="password" id="login-password" class="form-control" placeholder="••••••••" required style="padding-right:2.75rem;">
+            <button type="button" class="btn-toggle-password" data-target="login-password" id="btn-toggle-login-pwd" style="position:absolute; right:0.75rem; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:0.25rem; display:flex; align-items:center; justify-content:center; transition:color 0.2s; outline:none;" title="Toggle Password Visibility" aria-label="Toggle Password Visibility">
+              <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Sign In</button>
+        <button type="button" id="btn-back-to-site" class="btn btn-secondary" style="width:100%">Back to Website</button>
+      </form>
+
+      <!-- Quick-Access Demo Accounts Section -->
+      <div style="margin-top:2.5rem; border-top:1px dashed var(--border-color); padding-top:1.5rem;">
+        <p style="text-align:center; font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem; font-weight:600;">QUICK-ACCESS PORTAL DEMOS</p>
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.5rem;">
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="PR20260001" data-pwd="proprietor123" style="min-height:38px; font-size:0.8rem;">Proprietor</button>
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="HT20260001" data-pwd="headteacher123" style="min-height:38px; font-size:0.8rem;">Head Teacher</button>
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="FA20260001" data-pwd="finance123" style="min-height:38px; font-size:0.8rem;">Finance Officer</button>
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="AD20260001" data-pwd="admin123" style="min-height:38px; font-size:0.8rem;">School Admin</button>
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="FJT20260001" data-pwd="teacher123" style="min-height:38px; font-size:0.8rem;">Teacher (Creche)</button>
+          <button type="button" class="btn btn-secondary btn-demo-login" data-uid="FJS20260001" data-pwd="student123" style="min-height:38px; font-size:0.8rem; grid-column: span 2;">Student / Parent</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PASSWORD INITIALIZATION PANEL (Hidden by default) -->
+  <div id="view-set-password" class="landing-page portal-hidden" style="justify-content:center; align-items:center; min-height: 100vh;">
+    <div class="admissions-box" style="width:100%; max-width:480px; padding:2.5rem; position:relative; z-index:1;">
+      <div style="text-align:center; margin-bottom:2rem;">
+        <img src="./assets/logo.png" alt="Father's Joy Academy" style="width:68px; height:68px; object-fit:contain; margin:0 auto 0.75rem; display:block; filter:drop-shadow(0 2px 8px rgba(0,0,0,0.25));">
+        <h2 style="margin-top:0.5rem; font-family:var(--font-family-display);">Set Account Password</h2>
+        <p style="color:var(--text-secondary); font-size:0.9rem; margin-top:0.25rem;">Complete your account setup by setting a secure password</p>
+      </div>
+
+      <form id="form-set-new-password" style="display:flex; flex-direction:column; gap:1.25rem;">
+        <input type="hidden" id="set-pwd-uid">
+        <input type="hidden" id="set-pwd-userid">
+        <div class="form-group">
+          <label class="form-label">Full Name / Account ID</label>
+          <input type="text" id="set-pwd-display-name" class="form-control" readonly style="background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-muted);">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Enter New Password</label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input type="password" id="set-pwd-input" class="form-control" placeholder="Minimum 6 characters" required minlength="6" style="padding-right:2.75rem;">
+            <button type="button" class="btn-toggle-password" data-target="set-pwd-input" style="position:absolute; right:0.75rem; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:0.25rem; display:flex; align-items:center; justify-content:center; transition:color 0.2s; outline:none;" title="Toggle Password Visibility" aria-label="Toggle Password Visibility">
+              <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm New Password</label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input type="password" id="set-pwd-confirm" class="form-control" placeholder="Re-type password" required minlength="6" style="padding-right:2.75rem;">
+            <button type="button" class="btn-toggle-password" data-target="set-pwd-confirm" style="position:absolute; right:0.75rem; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:0.25rem; display:flex; align-items:center; justify-content:center; transition:color 0.2s; outline:none;" title="Toggle Password Visibility" aria-label="Toggle Password Visibility">
+              <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Set Password & Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN PORTAL DASHBOARDS SHELL (Hidden by default) -->
+  <div id="view-dashboard-shell" class="app-container portal-hidden">
+    <!-- Header -->
+    <header class="app-header">
+      <div style="display:flex; align-items:center; gap:0.75rem; min-width:0;">
+        <button id="btn-sidebar-toggle" class="btn-icon" aria-label="Toggle Navigation">☰</button>
+        <span id="header-user-welcome" style="font-weight:700; cursor:pointer; display:flex; align-items:center; gap:0.5rem; min-width:0;">
+          <img id="header-avatar" src="" style="width:32px; height:32px; border-radius:50%; object-fit:cover; display:inline-block; border:1.5px solid var(--accent-primary); flex-shrink:0;">
+          <span id="header-user-name">Loading...</span>
+        </span>
+        <span id="offline-badge" class="badge badge-warning portal-hidden">Offline</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:0.6rem; flex-shrink:0;">
+        <button id="btn-theme-toggle-portal" class="btn-icon" title="Toggle Theme" aria-label="Toggle Theme">🌓</button>
+        <button id="btn-notifications-toggle" class="btn-icon" style="position:relative;" title="Notifications" aria-label="Notifications">
+          🔔<span id="notification-badge" class="badge badge-danger" style="position:absolute; top:-4px; right:-4px; padding:2px 5px; font-size:0.65rem; border-radius:50%; display:none; justify-content:center; align-items:center; min-height:16px; min-width:16px;">0</span>
+        </button>
+        <button id="btn-logout" class="btn btn-secondary" style="min-height:34px; padding:0 0.85rem; font-size:0.825rem;">Logout</button>
+      </div>
+    </header>
+
+    <!-- Sidebar Backdrop Overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar-drawer" class="app-sidebar">
+      <div class="sidebar-brand" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+        <div style="display:flex; align-items:center; gap:0.4rem;">
+          <img src="./assets/logo.png" alt="Father's Joy Academy" style="width:28px; height:28px; object-fit:contain; display:inline-block; vertical-align:middle;">
+          <span>Portal Workspace</span>
+        </div>
+        <button id="btn-sidebar-close" class="btn-icon mobile-only-flex" style="font-size:1.1rem; padding:0.25rem; cursor:pointer;" aria-label="Close sidebar">✕</button>
+      </div>
+      <ul id="sidebar-menu-links" class="sidebar-menu">
+        <!-- Rendered Dynamically -->
+      </ul>
+    </aside>
+
+    <!-- Main Viewport Context -->
+    <main class="app-content">
+      <!-- Dynamic Dashboard Sub-Views Loaded Here -->
+      <div id="dashboard-subview-container"></div>
+    </main>
+
+  </div>
+
+  <!-- PROPRIETOR STATS POPUP MODAL -->
+  <div id="proprietor-modal" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); display:flex; align-items:flex-start; justify-content:center; z-index:2500; padding:2.5rem 1rem; overflow-y:auto;">
+    <div class="admissions-box" id="proprietor-modal-content" style="width:100%; max-width:500px; padding:2rem; margin:0 auto; margin-bottom:2rem; max-height:calc(100vh - 5rem); overflow-y:auto; position:relative; background:var(--bg-secondary); border:1px solid var(--border-color); color:var(--text-primary); border-radius:14px; box-shadow:var(--shadow-lg);">
+      <button id="btn-close-prop-modal" class="btn-icon" style="position:absolute; top:1rem; right:1rem; cursor:pointer;">✕</button>
+      <div id="proprietor-modal-body" style="margin-top:1rem;"></div>
+    </div>
+  </div>
+
+  <!-- STAFF TASK DIALOG MODAL -->
+  <div id="task-modal" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); display:flex; align-items:flex-start; justify-content:center; z-index:2500; padding:2.5rem 1rem; overflow-y:auto;">
+    <div class="admissions-box" style="width:100%; max-width:450px; padding:2.5rem; margin:0 auto; margin-bottom:2rem; max-height:calc(100vh - 5rem); overflow-y:auto; position:relative; background:var(--bg-secondary); border:1px solid var(--border-color); color:var(--text-primary); border-radius:14px; box-shadow:var(--shadow-lg);">
+      <button id="btn-close-task-modal" class="btn-icon" style="position:absolute; top:1rem; right:1rem; cursor:pointer;">✕</button>
+      <h3 id="task-modal-title" style="margin-bottom:1rem; font-family:var(--font-family-display);">Add New Task</h3>
+      <form id="form-staff-task" style="display:flex; flex-direction:column; gap:1.25rem;">
+        <input type="hidden" id="task-input-id">
+        <div class="form-group">
+          <label class="form-label">Task Description</label>
+          <input type="text" id="task-input-desc" class="form-control" placeholder="e.g. Verify manual cash ledger entries" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Assign To Active Staff</label>
+          <select id="task-input-assignee" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            <!-- Loaded dynamically from active staff -->
+          </select>
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end; margin-top:1rem;">
+          <button type="button" id="btn-cancel-task-modal" class="btn btn-secondary" style="min-height:38px;">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="min-height:38px;">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- QUESTIONNAIRE DIALOG MODAL -->
+  <div id="questionnaire-modal" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); display:flex; align-items:flex-start; justify-content:center; z-index:2500; padding:2.5rem 1rem; overflow-y:auto;">
+    <div class="admissions-box" id="questionnaire-modal-content" style="width:100%; max-width:500px; padding:2.5rem; margin:0 auto; margin-bottom:2rem; max-height:calc(100vh - 5rem); overflow-y:auto; position:relative; background:var(--bg-secondary); border:1px solid var(--border-color); color:var(--text-primary); border-radius:14px; box-shadow:var(--shadow-lg);">
+      <button id="btn-close-quest-modal" class="btn-icon" style="position:absolute; top:1rem; right:1rem; cursor:pointer;">✕</button>
+      <div id="questionnaire-modal-body" style="margin-top:0.5rem;"></div>
+    </div>
+  </div>
+
+  <!-- PERSONAL PROFILE WORKSPACE MODAL -->
+  <div id="personal-profile-modal" class="portal-hidden profile-modal-backdrop">
+    <div class="admissions-box personal-profile-modal-box">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; border-bottom:1px solid var(--border-color); padding-bottom:0.75rem;">
+        <h3 style="margin:0; display:flex; align-items:center; gap:0.5rem; font-size:1.15rem;">⚲ Personal Profile Workspace</h3>
+        <button type="button" id="btn-close-personal-profile-modal-top" class="btn-icon" style="width:32px; height:32px; font-size:0.9rem; cursor:pointer;" aria-label="Close Profile">✕</button>
+      </div>
+      <form id="form-personal-profile-update" style="display:flex; flex-direction:column; gap:1.25rem;">
+        <!-- Avatar/Picture Display & Edit -->
+        <div class="profile-avatar-row">
+          <img id="profile-modal-img" src="" class="profile-avatar-img">
+          <div class="profile-avatar-controls">
+            <div>
+              <label class="form-label" style="margin-bottom:0.25rem;">Profile Image (Upload from device)</label>
+              <input type="file" id="prof-photo-file-input" accept="image/*" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary); padding: 0.25rem 0.5rem; font-size: 0.85rem;">
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:0px; font-size:0.75rem; color:var(--text-secondary);">Or Profile Image URL / base64</label>
+              <input type="text" id="prof-photo-url-val" class="form-control" placeholder="Enter image URL or paste base64 data-url..." style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary); font-size: 0.85rem; height: 32px;">
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-fields-grid grid-2" style="gap:1rem;">
+          <div class="form-group">
+            <label class="form-label">First Name</label>
+            <input type="text" id="prof-first-name" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Other Name(s)</label>
+            <input type="text" id="prof-other-name" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Last Name</label>
+            <input type="text" id="prof-last-name" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Gender</label>
+            <select id="prof-gender" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Date of Birth</label>
+            <input type="date" id="prof-dob" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Phone Contact</label>
+            <input type="text" id="prof-phone" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email Address</label>
+            <input type="email" id="prof-email" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group" style="grid-column: span 2;">
+            <label class="form-label">Residential Address</label>
+            <input type="text" id="prof-address" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+        </div>
+
+        <!-- Emergency Contact Details -->
+        <h4 style="margin-top:0.5rem; color:var(--accent-primary); border-bottom:1px solid var(--border-color); padding-bottom:0.25rem;">Emergency Contact</h4>
+        <div class="grid-2" style="gap:1rem;">
+          <div class="form-group">
+            <label class="form-label">Contact Name</label>
+            <input type="text" id="prof-emer-name" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact Phone</label>
+            <input type="text" id="prof-emer-phone" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+          </div>
+        </div>
+
+        <!-- Student Parent / Guardian Details (Student Only) -->
+        <div id="prof-student-extra-fields" class="portal-hidden">
+          <h4 style="margin-top:0.5rem; color:var(--accent-primary); border-bottom:1px solid var(--border-color); padding-bottom:0.25rem;">Father's Details</h4>
+          <div class="grid-3" style="gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Father's Full Name</label>
+              <input type="text" id="prof-father-name" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Father's Occupation</label>
+              <input type="text" id="prof-father-occupation" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Father's Contact Number</label>
+              <input type="tel" id="prof-father-phone" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+          </div>
+
+          <h4 style="margin-top:0.5rem; color:var(--accent-primary); border-bottom:1px solid var(--border-color); padding-bottom:0.25rem;">Mother's Details</h4>
+          <div class="grid-3" style="gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Mother's Full Name</label>
+              <input type="text" id="prof-mother-name" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mother's Occupation</label>
+              <input type="text" id="prof-mother-occupation" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mother's Contact Number</label>
+              <input type="tel" id="prof-mother-phone" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+          </div>
+
+          <h4 style="margin-top:0.5rem; color:var(--accent-primary); border-bottom:1px solid var(--border-color); padding-bottom:0.25rem;">Primary Guardian Details (if applicable)</h4>
+          <div class="grid-3" style="gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Guardian Name</label>
+              <input type="text" id="prof-guard-name" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Guardian Phone</label>
+              <input type="text" id="prof-guard-phone" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Relationship</label>
+              <input type="text" id="prof-guard-rel" class="form-control" placeholder="e.g. Uncle / Aunt / Guardian" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+            </div>
+          </div>
+        </div>
+
+        <!-- Payslip section (Staff Only) -->
+        <div id="prof-staff-payslips-section" class="portal-hidden">
+          <h4 style="margin-top:0.5rem; color:var(--accent-primary); border-bottom:1px solid var(--border-color); padding-bottom:0.25rem;">My Payslip Archives</h4>
+          <div id="prof-payslips-list" style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
+            <!-- Loaded dynamically -->
+          </div>
+          <div style="margin-top:0.75rem; border-top:1px dashed var(--border-color); padding-top:0.75rem;">
+            <button type="button" id="btn-view-current-payslip" class="btn btn-primary" style="width:100%; min-height:36px; font-size:0.85rem;">
+              🗎 View Current Digital Payslip
+            </button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:1rem; margin-top:1.5rem;">
+          <button type="submit" class="btn btn-primary" style="flex:1; min-height:38px;">Submit Data Change Request</button>
+          <button type="button" id="btn-close-personal-profile-modal" class="btn btn-secondary" style="flex:1; min-height:38px;">Close Profile</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
+  <script src="./firebase-config.js"></script>
+  <script src="./db.js"></script>
+  <script src="./api.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
