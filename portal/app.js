@@ -18399,17 +18399,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("form-portal-login").addEventListener("submit", handlePortalLogin);
   document.getElementById("form-forced-reset").addEventListener("submit", handleForcedReset);
 
-  const demoButtons = document.querySelectorAll(".btn-demo-login");
-  demoButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const uid = btn.getAttribute("data-uid");
-      const pwd = btn.getAttribute("data-pwd");
-      document.getElementById("login-uid").value = uid;
-      document.getElementById("login-password").value = pwd;
-      document.getElementById("form-portal-login").dispatchEvent(new Event("submit"));
-    });
-  });
-
   document.getElementById("btn-notifications-toggle").addEventListener("click", () => {
     const sidebar = document.getElementById("sidebar-menu-links");
     if (sidebar) {
