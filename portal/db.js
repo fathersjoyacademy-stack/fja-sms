@@ -379,28 +379,27 @@ const db = {
   },
 
   // Save/Update record globally (IndexedDB + Cloud Firestore)
-  put(storeName, obj) {
+  async put(storeName, obj) {
     const isOnline = navigator.onLine;
     obj.synced = isOnline;
     if (!obj.updated_at) {
       obj.updated_at = new Date().toISOString();
     }
     
-    return this.putLocal(storeName, obj).then((res) => {
-      if (isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
-        try {
-          const docId = this.getDocId(storeName, obj);
-          if (docId) {
-            firebase.firestore().collection(storeName).doc(docId).set(obj);
-          }
-        } catch (err) {
-          console.warn("Firestore save failed (offline queue active):", err);
-          obj.synced = false;
-          this.putLocal(storeName, obj);
+    const res = await this.putLocal(storeName, obj);
+    if (isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+      try {
+        const docId = this.getDocId(storeName, obj);
+        if (docId) {
+          await firebase.firestore().collection(storeName).doc(docId).set(obj);
         }
+      } catch (err) {
+        console.warn("Firestore save failed (offline queue active):", err);
+        obj.synced = false;
+        await this.putLocal(storeName, obj);
       }
-      return res;
-    });
+    }
+    return res;
   },
 
   // Add record (fails if key exists)
@@ -1091,6 +1090,14 @@ async function seedMockData() {
         { name: "Mrs. Comfort A. Appiah", role: "Head Teacher", image: "" },
         { name: "John K. Larbi", role: "Administration & Accounts", image: "" }
       ])
+    },
+    {
+      content_key: "gallery_albums",
+      value: JSON.stringify([
+        { id: "alb-general", name: "General" },
+        { id: "alb-academics", name: "Academics" },
+        { id: "alb-sports", name: "Sports" }
+      ])
     }
   ];
 
@@ -1188,12 +1195,44 @@ function startFirestoreSync() {
           const promises = [];
           snapshot.forEach(doc => {
             const docData = doc.data();
-            promises.push(
-              db.putLocal(storeName, docData).then(() => {
-                const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });
-                window.dispatchEvent(event);
-              })
-            );
+            promises.push((async () => {
+              const docId = db.getDocId(storeName, docData);
+              if (docId) {
+                const localDoc = await db.get(storeName, docId);
+                if (localDoc && localDoc.updated_at && docData.updated_at) {
+                  const localTime = new Date(localDoc.updated_at).getTime();
+                  const remoteTime = new Date(docData.updated_at).getTime();
+                  if (localTime > remoteTime) {
+                    // Local record is newer: keep local data and push up to cloud
+                    try {
+                      if (navigator.onLine) {
+                        await firestore.collection(storeName).doc(docId).set(localDoc);
+                      }
+                    } catch (e) {
+                      console.warn(`Initial sync push for ${storeName}/${docId} skipped:`, e);
+                    }
+                    return;
+                  }
+                }
+                // Guard gallery content against stale empty sync wiping out user albums
+                if (storeName === "cms_content" && (docId === "gallery_images" || docId === "gallery_albums")) {
+                  try {
+                    const localVal = localDoc && localDoc.value ? JSON.parse(localDoc.value) : [];
+                    const remoteVal = docData.value ? JSON.parse(docData.value) : [];
+                    if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
+                      console.log(`Preserving local ${docId} against empty remote cloud sync.`);
+                      try {
+                        await firestore.collection(storeName).doc(docId).set(localDoc);
+                      } catch (e) {}
+                      return;
+                    }
+                  } catch (e) {}
+                }
+              }
+              await db.putLocal(storeName, docData);
+              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });
+              window.dispatchEvent(event);
+            })());
           });
           await Promise.all(promises);
           localStorage.setItem(lastSyncKey, new Date().toISOString());
@@ -1236,20 +1275,36 @@ function startFirestoreSync() {
 
       // 2. Real-time multi-device listener
       firestore.collection(storeName).onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(change => {
+        snapshot.docChanges().forEach(async (change) => {
           const docData = change.doc.data();
           const docId = change.doc.id;
           
           if (change.type === "added" || change.type === "modified") {
-            db.putLocal(storeName, docData).then(() => {
-              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });
-              window.dispatchEvent(event);
-            });
+            const localDoc = await db.get(storeName, docId);
+            if (localDoc && localDoc.updated_at && docData.updated_at) {
+              const localTime = new Date(localDoc.updated_at).getTime();
+              const remoteTime = new Date(docData.updated_at).getTime();
+              if (localTime > remoteTime) {
+                // Local is newer than incoming change, ignore stale update
+                return;
+              }
+            }
+            if (storeName === "cms_content" && (docId === "gallery_images" || docId === "gallery_albums")) {
+              try {
+                const localVal = localDoc && localDoc.value ? JSON.parse(localDoc.value) : [];
+                const remoteVal = docData.value ? JSON.parse(docData.value) : [];
+                if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
+                  return;
+                }
+              } catch (e) {}
+            }
+            await db.putLocal(storeName, docData);
+            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });
+            window.dispatchEvent(event);
           } else if (change.type === "removed") {
-            db.deleteLocal(storeName, docId).then(() => {
-              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
-              window.dispatchEvent(event);
-            });
+            await db.deleteLocal(storeName, docId);
+            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
+            window.dispatchEvent(event);
           }
         });
         localStorage.setItem(lastSyncKey, new Date().toISOString());

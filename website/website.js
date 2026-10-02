@@ -119,26 +119,37 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
 
       const container = document.getElementById("cms-gallery-container");
-      container.innerHTML = Object.keys(albums).map(albumName => {
-        const albumPhotos = albums[albumName];
-        const firstPhoto = albumPhotos[0];
-        return `
-          <div class="gallery-item btn-open-album" data-album="${albumName}" style="cursor:pointer; position:relative;">
-            <img src="${firstPhoto.url}" alt="${firstPhoto.title}">
-            <div class="gallery-caption" style="text-align:center;">${albumName} (${albumPhotos.length} photos)</div>
-          </div>
-        `;
-      }).join("");
+      if (container) {
+        const albumKeys = Object.keys(albums).filter(name => albums[name] && albums[name].length > 0);
+        if (albumKeys.length === 0) {
+          container.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); font-size: 0.95rem;">
+              Campus photo galleries will be available soon. Check back shortly!
+            </div>
+          `;
+        } else {
+          container.innerHTML = albumKeys.map(albumName => {
+            const albumPhotos = albums[albumName];
+            const firstPhoto = albumPhotos[0];
+            return `
+              <div class="gallery-item btn-open-album" data-album="${albumName}" style="cursor:pointer; position:relative;">
+                <img src="${firstPhoto.url}" alt="${firstPhoto.title}">
+                <div class="gallery-caption" style="text-align:center;">${albumName} (${albumPhotos.length} photos)</div>
+              </div>
+            `;
+          }).join("");
 
-      container.querySelectorAll(".btn-open-album").forEach(el => {
-        el.addEventListener("click", () => {
-          const albumName = el.getAttribute("data-album");
-          const albumPhotos = albums[albumName];
-          if (albumPhotos) {
-            openGalleryCarousel(albumName, albumPhotos);
-          }
-        });
-      });
+          container.querySelectorAll(".btn-open-album").forEach(el => {
+            el.addEventListener("click", () => {
+              const albumName = el.getAttribute("data-album");
+              const albumPhotos = albums[albumName];
+              if (albumPhotos && albumPhotos.length > 0) {
+                openGalleryCarousel(albumName, albumPhotos);
+              }
+            });
+          });
+        }
+      }
     }
 
     // News Feed
@@ -441,17 +452,18 @@ function openGalleryCarousel(albumName, photos) {
   function updateCarousel() {
     const photo = photos[currentIndex];
     body.innerHTML = `
-      <h3 style="margin-bottom:0.5rem; color:white; font-family:var(--font-family-display);">${albumName} Album</h3>
-      <div style="position:relative; display:flex; align-items:center; justify-content:center; gap:1rem; aspect-ratio:16/9; max-height:450px; border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); background:#000; width: 100%;">
-        <img src="${photo.url}" style="max-width:100%; max-height:100%; object-fit:contain;">
+      <h3 style="margin-bottom:0.25rem; color:white; font-family:var(--font-family-display); font-size:1.5rem;">${albumName} Album</h3>
+      <div style="position:relative; display:flex; align-items:center; justify-content:center; width:100%; min-height:280px; max-height:75vh; border-radius:12px; background:transparent;">
+        <img src="${photo.url}" alt="${photo.title || 'Photo'}" style="max-width:100%; max-height:70vh; width:auto; height:auto; object-fit:contain; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,0.35); background:transparent; display:block; margin:0 auto;">
         
         ${photos.length > 1 ? `
-          <button id="btn-carousel-prev" class="btn btn-secondary" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); border-radius:50%; width:40px; height:40px; min-height:40px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); border:none; color:white; font-size:1.25rem; cursor:pointer;">❮</button>
-          <button id="btn-carousel-next" class="btn btn-secondary" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); border-radius:50%; width:40px; height:40px; min-height:40px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); border:none; color:white; font-size:1.25rem; cursor:pointer;">❯</button>
+          <button id="btn-carousel-prev" class="btn btn-secondary" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); border-radius:50%; width:44px; height:44px; min-height:44px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,0.7); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,0.25); color:white; font-size:1.35rem; cursor:pointer; z-index:10; box-shadow:0 4px 12px rgba(0,0,0,0.3);">❮</button>
+          <button id="btn-carousel-next" class="btn btn-secondary" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); border-radius:50%; width:44px; height:44px; min-height:44px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,0.7); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,0.25); color:white; font-size:1.35rem; cursor:pointer; z-index:10; box-shadow:0 4px 12px rgba(0,0,0,0.3);">❯</button>
         ` : ''}
       </div>
-      <div>
-        <div style="font-size:0.9rem; color:rgba(255,255,255,0.7); margin-top:0.35rem; font-weight:500;">Photo ${currentIndex + 1} of ${photos.length}</div>
+      <div style="text-align:center;">
+        <div style="font-size:1rem; color:white; font-weight:600; margin-top:0.25rem;">${photo.title || albumName}</div>
+        <div style="font-size:0.85rem; color:rgba(255,255,255,0.7); margin-top:0.2rem; font-weight:500;">Photo ${currentIndex + 1} of ${photos.length}</div>
       </div>
     `;
 

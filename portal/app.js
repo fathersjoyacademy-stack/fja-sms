@@ -439,29 +439,30 @@ async function renderLandingCMS() {
       });
 
       const container = document.getElementById("cms-gallery-container");
-      
-      // Show first photo of each album
-      container.innerHTML = Object.keys(albums).map(albumName => {
-        const albumPhotos = albums[albumName];
-        const firstPhoto = albumPhotos[0];
-        return `
-          <div class="gallery-item btn-open-album" data-album="${albumName}" style="cursor:pointer; position:relative;">
-            <img src="${firstPhoto.url}" alt="${firstPhoto.title}">
-            <div class="gallery-caption" style="text-align:center;">${albumName} (${albumPhotos.length} photos)</div>
-          </div>
-        `;
-      }).join("");
-
-      // Add click listener to open the carousel modal
-      container.querySelectorAll(".btn-open-album").forEach(el => {
-        el.addEventListener("click", () => {
-          const albumName = el.getAttribute("data-album");
+      if (container) {
+        // Show first photo of each album
+        container.innerHTML = Object.keys(albums).map(albumName => {
           const albumPhotos = albums[albumName];
-          if (albumPhotos) {
-            openGalleryCarousel(albumName, albumPhotos);
-          }
+          const firstPhoto = albumPhotos[0];
+          return `
+            <div class="gallery-item btn-open-album" data-album="${albumName}" style="cursor:pointer; position:relative;">
+              <img src="${firstPhoto.url}" alt="${firstPhoto.title}">
+              <div class="gallery-caption" style="text-align:center;">${albumName} (${albumPhotos.length} photos)</div>
+            </div>
+          `;
+        }).join("");
+
+        // Add click listener to open the carousel modal
+        container.querySelectorAll(".btn-open-album").forEach(el => {
+          el.addEventListener("click", () => {
+            const albumName = el.getAttribute("data-album");
+            const albumPhotos = albums[albumName];
+            if (albumPhotos && typeof openGalleryCarousel === "function") {
+              openGalleryCarousel(albumName, albumPhotos);
+            }
+          });
         });
-      });
+      }
     }
 
     const newsKey = await window.db.get("cms_content", "news_feed");
@@ -3543,11 +3544,17 @@ async function renderWebsiteCMS(container) {
               <div class="form-group">
                 <label class="form-label">Target Album / Gallery</label>
                 <div style="display:flex; flex-direction:column; gap:0.5rem;">
-                  <select id="cms-album-select" class="form-control">
-                    <option value="General">General</option>
-                    <option value="__NEW__">+ Create New Album...</option>
-                  </select>
-                  <input type="text" id="cms-photo-album-new" class="form-control portal-hidden" placeholder="Enter new album name...">
+                  <div style="display:flex; gap:0.5rem;">
+                    <select id="cms-album-select" class="form-control" style="flex:1;">
+                      <option value="General">General</option>
+                      <option value="__NEW__">+ Create New Album...</option>
+                    </select>
+                    <button id="btn-quick-create-album" type="button" class="btn btn-secondary" style="min-height:38px; white-space:nowrap; padding:0 0.85rem;" title="Create a new album folder">➕ New Album</button>
+                  </div>
+                  <div id="cms-new-album-bar" class="portal-hidden" style="display:flex; gap:0.5rem; align-items:center;">
+                    <input type="text" id="cms-photo-album-new" class="form-control" placeholder="Enter new album name (e.g. Graduation 2026)...">
+                    <button id="btn-save-new-album-only" type="button" class="btn btn-primary" style="min-height:38px; white-space:nowrap; padding:0 0.85rem;">Create Album</button>
+                  </div>
                 </div>
               </div>
               <div class="form-group">
@@ -3577,8 +3584,8 @@ async function renderWebsiteCMS(container) {
             
             <div style="display:flex; flex-direction:column; gap:1rem;">
               <div style="display:flex; justify-content:center;">
-                <div style="width:180px; height:120px; border-radius:8px; overflow:hidden; border:1px solid var(--border-color); background:var(--bg-primary);">
-                  <img id="edit-gallery-img-preview" src="" style="width:100%; height:100%; object-fit:cover;">
+                <div style="width:180px; height:120px; border-radius:8px; overflow:hidden; border:1px solid var(--border-color); background:var(--bg-card); display:flex; align-items:center; justify-content:center;">
+                  <img id="edit-gallery-img-preview" src="" style="width:100%; height:100%; object-fit:cover; background:transparent;">
                 </div>
               </div>
 
@@ -3701,21 +3708,84 @@ async function renderWebsiteCMS(container) {
       </div>
     `;
 
-    // Album select change toggle
+    // Album select change toggle & quick album creation
     const albumSelect = document.getElementById("cms-album-select");
+    const newAlbumBar = document.getElementById("cms-new-album-bar");
     const newAlbumInput = document.getElementById("cms-photo-album-new");
-    if (albumSelect && newAlbumInput) {
+    const btnQuickCreateAlbum = document.getElementById("btn-quick-create-album");
+    const btnSaveNewAlbumOnly = document.getElementById("btn-save-new-album-only");
+
+    if (albumSelect && newAlbumBar && newAlbumInput) {
       albumSelect.addEventListener("change", () => {
         if (albumSelect.value === "__NEW__") {
-          newAlbumInput.classList.remove("portal-hidden");
+          newAlbumBar.classList.remove("portal-hidden");
           newAlbumInput.focus();
         } else {
-          newAlbumInput.classList.add("portal-hidden");
+          newAlbumBar.classList.add("portal-hidden");
         }
       });
     }
 
-    async function renderCMSThumbnails() {
+    if (btnQuickCreateAlbum && newAlbumBar && newAlbumInput) {
+      btnQuickCreateAlbum.addEventListener("click", () => {
+        newAlbumBar.classList.remove("portal-hidden");
+        if (albumSelect) albumSelect.value = "__NEW__";
+        newAlbumInput.focus();
+      });
+    }
+
+    async function getStoredAlbums() {
+      const albumsKey = await window.db.get("cms_content", "gallery_albums");
+      let list = [];
+      if (albumsKey && albumsKey.value) {
+        try {
+          list = JSON.parse(albumsKey.value);
+        } catch (e) {
+          list = [];
+        }
+      }
+      if (!Array.isArray(list)) list = [];
+      const normalized = [];
+      const seen = new Set();
+      list.forEach(a => {
+        const name = typeof a === "string" ? a.trim() : (a && (a.name || a.title) ? (a.name || a.title).trim() : "");
+        if (name && !seen.has(name)) {
+          seen.add(name);
+          normalized.push({ id: (a && a.id) || `alb-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, name });
+        }
+      });
+      return normalized;
+    }
+
+    async function saveStoredAlbums(list) {
+      await window.db.put("cms_content", { content_key: "gallery_albums", value: JSON.stringify(list) });
+    }
+
+    if (btnSaveNewAlbumOnly && newAlbumInput) {
+      btnSaveNewAlbumOnly.addEventListener("click", async () => {
+        const rawName = sanitizeXSS(newAlbumInput.value.trim());
+        if (!rawName) {
+          showToast("Please enter an album name.", "warning");
+          return;
+        }
+        const stored = await getStoredAlbums();
+        if (stored.some(a => a.name.toLowerCase() === rawName.toLowerCase())) {
+          showToast(`Album "${rawName}" already exists.`, "info");
+          if (albumSelect) albumSelect.value = rawName;
+          if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+          newAlbumInput.value = "";
+          return;
+        }
+        stored.push({ id: `alb-${Date.now()}`, name: rawName, created_at: new Date().toISOString() });
+        await saveStoredAlbums(stored);
+        showToast(`Album "${rawName}" created successfully!`, "success");
+        newAlbumInput.value = "";
+        if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+        await renderCMSThumbnails(rawName);
+      });
+    }
+
+    async function renderCMSThumbnails(preferredSelected) {
       const container = document.getElementById("cms-saved-photos-preview");
       const totalCountSpan = document.getElementById("cms-total-photos-count");
       const galleryKey = await window.db.get("cms_content", "gallery_images");
@@ -3725,8 +3795,16 @@ async function renderWebsiteCMS(container) {
         totalCountSpan.textContent = `${gallery.length} photo${gallery.length === 1 ? '' : 's'}`;
       }
 
+      const storedAlbums = await getStoredAlbums();
+
       // Group by album
       const albums = {};
+      // Ensure General is present
+      albums["General"] = [];
+      storedAlbums.forEach(a => {
+        if (!albums[a.name]) albums[a.name] = [];
+      });
+
       gallery.forEach((item, idx) => {
         const alb = item.album || "General";
         if (!albums[alb]) albums[alb] = [];
@@ -3735,25 +3813,28 @@ async function renderWebsiteCMS(container) {
 
       // Update Album Select Dropdown
       if (albumSelect) {
-        const currentSelected = albumSelect.value;
+        const currentSelected = preferredSelected || albumSelect.value;
         const albumNames = Object.keys(albums);
         if (!albumNames.includes("General")) albumNames.unshift("General");
 
         albumSelect.innerHTML = albumNames.map(name => `
-          <option value="${name}">${name}</option>
+          <option value="${escapeHTML(name)}">${escapeHTML(name)}</option>
         `).join("") + `<option value="__NEW__">+ Create New Album...</option>`;
 
         if (currentSelected && (albumNames.includes(currentSelected) || currentSelected === "__NEW__")) {
           albumSelect.value = currentSelected;
+        } else {
+          albumSelect.value = "General";
         }
       }
 
       if (!container) return;
 
-      if (gallery.length === 0) {
+      const albumKeys = Object.keys(albums);
+      if (albumKeys.length === 0 || (albumKeys.length === 1 && albums["General"].length === 0 && storedAlbums.length === 0)) {
         container.innerHTML = `
           <div style="text-align:center; padding:2rem; border:1px dashed var(--border-color); border-radius:8px; color:var(--text-muted);">
-            No photos in gallery yet. Upload photos using the form above.
+            No photos in gallery yet. Upload photos or create an album using the form above.
           </div>
         `;
         return;
@@ -3768,26 +3849,32 @@ async function renderWebsiteCMS(container) {
 
       container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; padding-bottom:0.25rem;">
-          <span style="font-size:0.85rem; color:var(--text-secondary);">${Object.keys(albums).length} Album${Object.keys(albums).length === 1 ? '' : 's'} Available</span>
+          <span style="font-size:0.85rem; color:var(--text-secondary);">${albumKeys.length} Album${albumKeys.length === 1 ? '' : 's'} Available</span>
           <div style="display:flex; gap:0.4rem;">
             <button id="btn-collapse-all-albums" class="btn btn-secondary" style="min-height:28px; font-size:0.75rem; padding:0 0.6rem;">▲ Collapse All</button>
             <button id="btn-expand-all-albums" class="btn btn-secondary" style="min-height:28px; font-size:0.75rem; padding:0 0.6rem;">▼ Expand All</button>
           </div>
         </div>
-      ` + Object.keys(albums).map(albName => {
+      ` + albumKeys.map(albName => {
         const isCollapsed = !!collapsedState[albName];
+        const photoList = albums[albName] || [];
         return `
         <div class="cms-album-card" style="width: 100%; border: 1px solid var(--border-color); border-radius: 10px; padding: 0.85rem 1rem; background: var(--bg-card); transition: all 0.2s;">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; ${isCollapsed ? '' : 'border-bottom: 1px solid var(--border-color); padding-bottom: 0.6rem; margin-bottom: 0.75rem;'}">
             <div class="cms-album-header-toggle" data-album="${escapeHTML(albName)}" style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem; user-select: none;">
               <span style="font-size: 0.85rem; color: var(--accent-primary);">${isCollapsed ? '▶' : '▼'}</span>
               <strong style="color: var(--accent-secondary); font-size: 0.95rem;">📁 ${escapeHTML(albName)}</strong>
-              <span class="badge badge-info" style="font-size: 0.75rem; padding: 2px 7px;">${albums[albName].length} photo${albums[albName].length === 1 ? '' : 's'}</span>
+              <span class="badge ${photoList.length > 0 ? 'badge-info' : 'badge-warning'}" style="font-size: 0.75rem; padding: 2px 7px;">${photoList.length} photo${photoList.length === 1 ? '' : 's'}</span>
             </div>
             <div style="display: flex; gap: 0.4rem; align-items: center;">
-              <button class="btn btn-secondary btn-toggle-album-collapse" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem;">
-                ${isCollapsed ? 'Show Photos' : 'Hide Photos'}
+              <button class="btn btn-primary btn-add-photos-to-album" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem; display:flex; align-items:center; gap:0.25rem;">
+                <span>➕</span> Add Photos
               </button>
+              ${photoList.length > 0 ? `
+                <button class="btn btn-secondary btn-toggle-album-collapse" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem;">
+                  ${isCollapsed ? 'Show Photos' : 'Hide Photos'}
+                </button>
+              ` : ''}
               <button class="btn btn-secondary btn-rename-album" data-album="${escapeHTML(albName)}" style="min-height: 28px; font-size: 0.75rem; padding: 0 0.6rem; display:flex; align-items:center; gap:0.25rem;">
                 <span>✏️</span> Rename
               </button>
@@ -3797,10 +3884,14 @@ async function renderWebsiteCMS(container) {
             </div>
           </div>
 
-          <div class="cms-album-photo-grid" style="display: ${isCollapsed ? 'none' : 'grid'}; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem;">
-            ${albums[albName].map(obj => `
-              <div style="position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; border:1px solid var(--border-color); background:#0f172a; display:flex; align-items:center; justify-content:center;">
-                <img src="${obj.item.url}" style="width:100%; height:100%; object-fit:contain; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'">
+          <div class="cms-album-photo-grid" style="display: ${isCollapsed ? 'none' : (photoList.length > 0 ? 'grid' : 'block')}; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem;">
+            ${photoList.length === 0 ? `
+              <div style="padding: 1rem; text-align: center; border: 1px dashed var(--border-color); border-radius: 8px; color: var(--text-muted); font-size: 0.85rem; background: var(--bg-primary);">
+                No photos in this album yet. Click <strong>"➕ Add Photos"</strong> above to select and upload pictures.
+              </div>
+            ` : photoList.map(obj => `
+              <div style="position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; border:1px solid var(--border-color); background:var(--bg-card); display:flex; align-items:center; justify-content:center;">
+                <img src="${obj.item.url}" alt="${escapeHTML(obj.item.title || 'Photo')}" style="width:100%; height:100%; object-fit:cover; background:transparent; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'">
                 
                 <!-- Card Action Controls -->
                 <div style="position:absolute; top:4px; right:4px; display:flex; gap:4px; z-index:2;">
@@ -3824,13 +3915,29 @@ async function renderWebsiteCMS(container) {
       });
 
       document.getElementById("btn-collapse-all-albums")?.addEventListener("click", () => {
-        Object.keys(albums).forEach(a => collapsedState[a] = true);
+        albumKeys.forEach(a => collapsedState[a] = true);
         renderCMSThumbnails();
       });
 
       document.getElementById("btn-expand-all-albums")?.addEventListener("click", () => {
-        Object.keys(albums).forEach(a => collapsedState[a] = false);
+        albumKeys.forEach(a => collapsedState[a] = false);
         renderCMSThumbnails();
+      });
+
+      // Add photos to specific album quick button
+      container.querySelectorAll(".btn-add-photos-to-album").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const alb = btn.getAttribute("data-album");
+          if (albumSelect) {
+            albumSelect.value = alb;
+            if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+          }
+          const fileInput = document.getElementById("cms-photo-file");
+          if (fileInput) {
+            fileInput.scrollIntoView({ behavior: "smooth", block: "center" });
+            fileInput.click();
+          }
+        });
       });
 
       // Single photo deletion
@@ -3894,6 +4001,10 @@ async function renderWebsiteCMS(container) {
         btn.addEventListener("click", async () => {
           const albName = btn.getAttribute("data-album");
           if (confirm(`Are you sure you want to delete the entire "${albName}" album and all its photos?`)) {
+            let stored = await getStoredAlbums();
+            stored = stored.filter(a => a.name !== albName);
+            await saveStoredAlbums(stored);
+
             const updatedGallery = gallery.filter(item => (item.album || "General") !== albName);
             await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(updatedGallery) });
             showToast(`Album "${albName}" deleted successfully`, "info");
@@ -3936,6 +4047,13 @@ async function renderWebsiteCMS(container) {
       gallery[idx].title = updatedTitle;
       gallery[idx].album = updatedAlbum;
 
+      // Ensure updated album exists in storedAlbums
+      const stored = await getStoredAlbums();
+      if (!stored.some(a => a.name.toLowerCase() === updatedAlbum.toLowerCase())) {
+        stored.push({ id: `alb-${Date.now()}`, name: updatedAlbum, created_at: new Date().toISOString() });
+        await saveStoredAlbums(stored);
+      }
+
       if (replaceFile && replaceFile.files && replaceFile.files[0]) {
         showToast("Compressing replacement photo...", "info");
         gallery[idx].url = await compressImage(replaceFile.files[0]);
@@ -3944,7 +4062,7 @@ async function renderWebsiteCMS(container) {
       await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
       showToast("Photo details updated successfully!", "success");
       closePhotoEdit();
-      renderCMSThumbnails();
+      renderCMSThumbnails(updatedAlbum);
     });
 
     // Save Album Rename Handler
@@ -3964,6 +4082,20 @@ async function renderWebsiteCMS(container) {
         return;
       }
 
+      // Update in storedAlbums
+      let stored = await getStoredAlbums();
+      let found = false;
+      stored.forEach(a => {
+        if (a.name === oldName) {
+          a.name = newName;
+          found = true;
+        }
+      });
+      if (!found) {
+        stored.push({ id: `alb-${Date.now()}`, name: newName });
+      }
+      await saveStoredAlbums(stored);
+
       const galleryKey = await window.db.get("cms_content", "gallery_images");
       const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
 
@@ -3976,12 +4108,12 @@ async function renderWebsiteCMS(container) {
       await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
       showToast(`Album renamed from "${oldName}" to "${newName}"!`, "success");
       closeAlbumRename();
-      renderCMSThumbnails();
+      renderCMSThumbnails(newName);
     });
 
     renderCMSThumbnails();
 
-    function compressImage(file, maxDimension = 900, quality = 0.8) {
+    function compressImage(file, maxDimension = 800, quality = 0.65) {
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -4002,6 +4134,9 @@ async function renderWebsiteCMS(container) {
             }
             canvas.width = w;
             canvas.height = h;
+            // Fill canvas with white background to eliminate any black background artifacts from transparent PNGs
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, w, h);
             ctx.drawImage(img, 0, 0, w, h);
             resolve(canvas.toDataURL("image/jpeg", quality));
           };
@@ -4054,8 +4189,28 @@ async function renderWebsiteCMS(container) {
       }
 
       if (files.length === 0) {
+        // If user entered a new album name but didn't select files, create the album folder
+        if (albumSelect.value === "__NEW__" && newAlbumInput.value.trim()) {
+          const stored = await getStoredAlbums();
+          if (!stored.some(a => a.name.toLowerCase() === album.toLowerCase())) {
+            stored.push({ id: `alb-${Date.now()}`, name: album, created_at: new Date().toISOString() });
+            await saveStoredAlbums(stored);
+          }
+          showToast(`Album "${album}" created successfully!`, "success");
+          newAlbumInput.value = "";
+          if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+          renderCMSThumbnails(album);
+          return;
+        }
         showToast("Please select at least one image file first.", "warning");
         return;
+      }
+
+      // Ensure target album is recorded in stored albums
+      const stored = await getStoredAlbums();
+      if (!stored.some(a => a.name.toLowerCase() === album.toLowerCase())) {
+        stored.push({ id: `alb-${Date.now()}`, name: album, created_at: new Date().toISOString() });
+        await saveStoredAlbums(stored);
       }
 
       showToast(`Compressing ${files.length} image(s)...`, "info");
@@ -4079,8 +4234,8 @@ async function renderWebsiteCMS(container) {
       fileInput.value = "";
       titleInput.value = "";
       newAlbumInput.value = "";
-      newAlbumInput.classList.add("portal-hidden");
-      renderCMSThumbnails();
+      if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+      renderCMSThumbnails(album);
     });
 
     // ==========================================

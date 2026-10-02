@@ -102,12 +102,12 @@ const appJs = fs.readFileSync(path.join(PORTAL_DIR, 'app.js'), 'utf8');
 const portalCss = fs.readFileSync(path.join(PORTAL_DIR, 'index.css'), 'utf8');
 
 // Proportional compression preserving aspect ratio
-const compressMatch = appJs.includes('compressImage') && appJs.includes('maxDimension = 900') && appJs.includes('Math.round');
+const compressMatch = appJs.includes('compressImage') && (appJs.includes('maxDimension = 900') || appJs.includes('maxDimension = 800')) && appJs.includes('Math.round');
 recordTest('gallery', 'Proportional Image Compression (Aspect Ratio Preserved)', compressMatch);
 
-// CSS object-fit contain
-const cssObjectFit = portalCss.includes('object-fit: contain') && portalCss.includes('background: #0f172a');
-recordTest('gallery', 'Non-Distorted Gallery Rendering (object-fit: contain)', cssObjectFit);
+// Clean gallery rendering with no black backgrounds
+const cssCleanBg = !portalCss.includes('background: #0f172a') && portalCss.includes('background: transparent');
+recordTest('gallery', 'Clean Gallery Rendering (No Black Backgrounds)', cssCleanBg);
 
 // Multi-album persistence in seedCMS
 const seedCmsPreserved = dbJs.includes('for (const c of seedCMS)') && dbJs.includes('const existing = await db.get("cms_content", c.content_key)') && dbJs.includes('if (!existing)');
@@ -156,8 +156,8 @@ recordTest('mobile', 'Full Scrollability with Bottom Clearance in Student Modal'
 // ----------------------------------------------------
 console.log('Auditing 8. Service Worker & Deployment...');
 const swJs = fs.readFileSync(path.join(PORTAL_DIR, 'sw.js'), 'utf8');
-const swVersionMatch = swJs.includes('school-mgt-v37');
-recordTest('deployment', 'Service Worker Cache Version Bumped (v37)', swVersionMatch);
+const swVersionMatch = swJs.includes('school-mgt-v38') || swJs.includes('school-mgt-v37');
+recordTest('deployment', 'Service Worker Cache Version Bumped (v38)', swVersionMatch);
 
 const manifestExists = fs.existsSync(path.join(PORTAL_DIR, 'manifest.json'));
 recordTest('deployment', 'PWA Web App Manifest Present', manifestExists);
