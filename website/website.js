@@ -80,8 +80,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-portal-enter-mobile").addEventListener("click", redirectToPortal);
 
   // Load and Render CMS contents from Database
-  try {
-    const nameKey = await window.db.get("cms_content", "school_name");
+  async function renderWebsiteCMSAndCalendar() {
+    try {
+      const nameKey = await window.db.get("cms_content", "school_name");
     const titleKey = await window.db.get("cms_content", "hero_title");
     const subKey = await window.db.get("cms_content", "hero_subtitle");
     const missionKey = await window.db.get("cms_content", "mission_statement");
@@ -287,9 +288,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-  } catch (err) {
-    console.error("Website CMS render failed:", err);
+    } catch (err) {
+      console.error("Website CMS render failed:", err);
+    }
   }
+
+  await renderWebsiteCMSAndCalendar();
+
+  window.addEventListener("dbSyncUpdate", async (e) => {
+    const { storeName } = (e && e.detail) || {};
+    if (storeName === "cms_content" || storeName === "academic_calendar") {
+      await renderWebsiteCMSAndCalendar();
+    }
+  });
 
   // Admissions Form Collapsible toggle
   const toggleBtn = document.getElementById("admissions-toggle");

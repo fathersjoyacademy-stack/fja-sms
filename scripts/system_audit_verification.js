@@ -156,8 +156,8 @@ recordTest('mobile', 'Full Scrollability with Bottom Clearance in Student Modal'
 // ----------------------------------------------------
 console.log('Auditing 8. Service Worker & Deployment...');
 const swJs = fs.readFileSync(path.join(PORTAL_DIR, 'sw.js'), 'utf8');
-const swVersionMatch = swJs.includes('school-mgt-v38') || swJs.includes('school-mgt-v37');
-recordTest('deployment', 'Service Worker Cache Version Bumped (v38)', swVersionMatch);
+const swVersionMatch = swJs.includes('school-mgt-v39') || swJs.includes('school-mgt-v38') || swJs.includes('school-mgt-v37');
+recordTest('deployment', 'Service Worker Cache Version Bumped (v39)', swVersionMatch);
 
 const manifestExists = fs.existsSync(path.join(PORTAL_DIR, 'manifest.json'));
 recordTest('deployment', 'PWA Web App Manifest Present', manifestExists);

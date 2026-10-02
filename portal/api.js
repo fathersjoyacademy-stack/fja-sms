@@ -25,31 +25,41 @@ const api = {
         const cal = await window.db.get("academic_calendar", "main-calendar");
         if (cal) {
           const today = new Date().toISOString().substring(0, 10);
-          let activeTerm = cal.active_term || "Term 3";
-          let termNum = 3;
-          let isVacation = false;
-          let startDate = cal.term3_start || "2026-05-04";
-          let endDate = cal.term3_end || "2026-08-07";
+          const ct = cal.canonical_terms || {};
+          const t1Start = cal.term1_start || (ct.term1 && ct.term1.start_date) || "2026-09-08";
+          const t1End = cal.term1_end || (ct.term1 && ct.term1.end_date) || "2026-12-17";
+          const t2Start = cal.term2_start || (ct.term2 && ct.term2.start_date) || "2027-01-05";
+          const t2End = cal.term2_end || (ct.term2 && ct.term2.end_date) || "2027-03-25";
+          const t3Start = cal.term3_start || (ct.term3 && ct.term3.start_date) || "2027-04-20";
+          const t3End = cal.term3_end || (ct.term3 && ct.term3.end_date) || "2027-07-22";
 
-          if (today >= cal.term1_start && today <= cal.term1_end) {
+          let activeTerm = cal.active_term || "Term 1";
+          let termNum = 1;
+          let isVacation = false;
+          let startDate = t1Start;
+          let endDate = t1End;
+
+          if (today >= t1Start && today <= t1End) {
             activeTerm = "Term 1";
             termNum = 1;
-            startDate = cal.term1_start;
-            endDate = cal.term1_end;
-          } else if (today >= cal.term2_start && today <= cal.term2_end) {
+            startDate = t1Start;
+            endDate = t1End;
+          } else if (today >= t2Start && today <= t2End) {
             activeTerm = "Term 2";
             termNum = 2;
-            startDate = cal.term2_start;
-            endDate = cal.term2_end;
-          } else if (today >= cal.term3_start && today <= cal.term3_end) {
+            startDate = t2Start;
+            endDate = t2End;
+          } else if (today >= t3Start && today <= t3End) {
             activeTerm = "Term 3";
             termNum = 3;
-            startDate = cal.term3_start;
-            endDate = cal.term3_end;
+            startDate = t3Start;
+            endDate = t3End;
           } else {
             isVacation = true;
             if (cal.active_term) activeTerm = cal.active_term;
             termNum = activeTerm === "Term 1" ? 1 : activeTerm === "Term 2" ? 2 : 3;
+            startDate = activeTerm === "Term 1" ? t1Start : activeTerm === "Term 2" ? t2Start : t3Start;
+            endDate = activeTerm === "Term 1" ? t1End : activeTerm === "Term 2" ? t2End : t3End;
           }
 
           const termObj = {
@@ -93,6 +103,7 @@ const api = {
       }
       cal.active_term = termName;
       if (academicYear) cal.academic_year = academicYear;
+      cal.updated_at = new Date().toISOString();
       await window.db.put("academic_calendar", cal);
       window.currentTermName = termName;
       if (typeof window.dbSyncUpdate === "function") {
@@ -103,6 +114,21 @@ const api = {
       console.error("setActiveTerm error:", e);
       return false;
     }
+  },
+
+  async syncToFirebase(storeName, data) {
+    if (window.isFirebaseConfigured && window.isFirebaseConfigured() && navigator.onLine) {
+      try {
+        const docId = window.db ? window.db.getDocId(storeName, data) : null;
+        if (docId) {
+          await firebase.firestore().collection(storeName).doc(docId).set(data);
+          return true;
+        }
+      } catch (e) {
+        console.warn(`api.syncToFirebase error for ${storeName}:`, e);
+      }
+    }
+    return false;
   },
 
   getCurrentUser() {

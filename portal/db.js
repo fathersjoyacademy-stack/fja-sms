@@ -382,8 +382,13 @@ const db = {
   async put(storeName, obj) {
     const isOnline = navigator.onLine;
     obj.synced = isOnline;
-    if (!obj.updated_at) {
+    if (!obj._preserve_updated_at) {
       obj.updated_at = new Date().toISOString();
+    } else {
+      delete obj._preserve_updated_at;
+    }
+    if (!obj.created_at) {
+      obj.created_at = obj.updated_at;
     }
     
     const res = await this.putLocal(storeName, obj);
@@ -710,26 +715,23 @@ async function seedMockData() {
       };
       await db.put("academic_calendar", seedCalendar);
     } else {
-      // Ensure calendar is updated to 2026/2027 Term 1 with official dates
+      // Ensure calendar is non-null and has academic_year without overriding custom term dates
       try {
         const cal = await db.get("academic_calendar", "main-calendar");
-        if (cal && (!cal.academic_year || cal.academic_year === "2025/2026" || cal.term1_start !== "2026-09-08")) {
-          cal.academic_year = "2026/2027";
-          cal.active_term = "Term 1";
-          cal.term1_start = "2026-09-08";
-          cal.term1_end = "2026-12-17";
-          cal.term2_start = "2027-01-05";
-          cal.term2_end = "2027-03-25";
-          cal.term3_start = "2027-04-20";
-          cal.term3_end = "2027-07-22";
-          cal.previous_academic_year = "2025/2026";
-          cal.prev_term1_start = "2025-09-02";
-          cal.prev_term1_end = "2025-12-18";
-          cal.prev_term2_start = "2026-01-08";
-          cal.prev_term2_end = "2026-04-01";
-          cal.prev_term3_start = "2026-04-21";
-          cal.prev_term3_end = "2026-07-31";
-          await db.put("academic_calendar", cal);
+        if (cal) {
+          let updated = false;
+          if (!cal.academic_year) {
+            cal.academic_year = "2026/2027";
+            updated = true;
+          }
+          if (!cal.term1_start) {
+            cal.term1_start = "2026-09-08";
+            cal.term1_end = "2026-12-17";
+            updated = true;
+          }
+          if (updated) {
+            await db.put("academic_calendar", cal);
+          }
         }
       } catch (calUpErr) {}
     }
@@ -1164,6 +1166,93 @@ const STORES_TO_SYNC = [
   "subjects"
 ];
 
+// Universal timestamp extractor supporting ISO strings, numeric timestamps, and Firestore Timestamps
+function getDocTimestamp(doc) {
+  if (!doc || typeof doc !== "object") return 0;
+  const raw = doc.updated_at || doc.updatedAt || doc.timestamp || doc.created_at || doc.createdAt || doc.date || doc.recorded_at;
+  if (!raw) return 0;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    return isNaN(t) ? 0 : t;
+  }
+  if (raw instanceof Date) return raw.getTime();
+  if (typeof raw.toMillis === "function") return raw.toMillis();
+  if (typeof raw.toDate === "function") return raw.toDate().getTime();
+  if (typeof raw.seconds === "number") {
+    return raw.seconds * 1000 + Math.floor((raw.nanoseconds || 0) / 1e6);
+  }
+  if (typeof raw._seconds === "number") {
+    return raw._seconds * 1000 + Math.floor((raw._nanoseconds || 0) / 1e6);
+  }
+  return 0;
+}
+
+// Universal bidirectional conflict resolution guard across all stores
+function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
+  if (!localDoc) return false;
+  if (!remoteDoc) return true;
+
+  // 1. Pending offline local changes must never be overwritten
+  if (localDoc.synced === false) {
+    return true;
+  }
+
+  const localTime = getDocTimestamp(localDoc);
+  const remoteTime = getDocTimestamp(remoteDoc);
+
+  // 2. Strict timestamp comparison
+  if (localTime > remoteTime) {
+    return true; // Local is strictly newer
+  }
+  if (remoteTime > localTime) {
+    // Edge case safety: protect user-populated data against blank/empty remote overwrites
+    if (storeName === "cms_content") {
+      try {
+        if (docId === "gallery_images" || docId === "gallery_albums" || docId === "news_feed") {
+          const localVal = localDoc.value ? JSON.parse(localDoc.value) : [];
+          const remoteVal = remoteDoc.value ? JSON.parse(remoteDoc.value) : [];
+          if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
+            return true;
+          }
+        } else if (typeof localDoc.value === "string" && localDoc.value.trim().length > 0) {
+          if (!remoteDoc.value || remoteDoc.value.trim().length === 0) {
+            return true;
+          }
+        }
+      } catch (e) {}
+    } else if (storeName === "academic_calendar" && docId === "main-calendar") {
+      if (localDoc.canonical_terms && !remoteDoc.canonical_terms) return true;
+      if (Array.isArray(localDoc.events) && localDoc.events.length > 0 && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
+    }
+    return false; // Remote is genuinely newer and non-empty
+  }
+
+  // 3. Timestamps are equal (or both 0):
+  // Check if remote is empty or missing data that local has
+  if (storeName === "cms_content") {
+    try {
+      if (docId === "gallery_images" || docId === "gallery_albums" || docId === "news_feed") {
+        const localVal = localDoc.value ? JSON.parse(localDoc.value) : [];
+        const remoteVal = remoteDoc.value ? JSON.parse(remoteDoc.value) : [];
+        if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
+          return true;
+        }
+      } else if (typeof localDoc.value === "string" && localDoc.value.trim().length > 0) {
+        if (!remoteDoc.value || remoteDoc.value.trim().length === 0) {
+          return true;
+        }
+      }
+    } catch (e) {}
+  } else if (storeName === "academic_calendar" && docId === "main-calendar") {
+    if (localDoc.canonical_terms && !remoteDoc.canonical_terms) return true;
+    if (Array.isArray(localDoc.events) && localDoc.events.length > 0 && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
+  }
+
+  // If local has timestamp > 0, preserve local
+  return localTime > 0;
+}
+
 function startFirestoreSync() {
   if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) {
     console.log("Firebase not configured - running in local-only Mode.");
@@ -1196,37 +1285,25 @@ function startFirestoreSync() {
           snapshot.forEach(doc => {
             const docData = doc.data();
             promises.push((async () => {
-              const docId = db.getDocId(storeName, docData);
+              const docId = db.getDocId(storeName, docData) || doc.id;
               if (docId) {
                 const localDoc = await db.get(storeName, docId);
-                if (localDoc && localDoc.updated_at && docData.updated_at) {
-                  const localTime = new Date(localDoc.updated_at).getTime();
-                  const remoteTime = new Date(docData.updated_at).getTime();
-                  if (localTime > remoteTime) {
-                    // Local record is newer: keep local data and push up to cloud
+                if (shouldKeepLocalDoc(storeName, docId, localDoc, docData)) {
+                  // Local record is newer or protected: keep local data and heal cloud if online
+                  const localTime = getDocTimestamp(localDoc);
+                  const remoteTime = getDocTimestamp(docData);
+                  if (localTime > remoteTime || localDoc.synced === false) {
                     try {
                       if (navigator.onLine) {
                         await firestore.collection(storeName).doc(docId).set(localDoc);
+                        localDoc.synced = true;
+                        await db.putLocal(storeName, localDoc);
                       }
                     } catch (e) {
-                      console.warn(`Initial sync push for ${storeName}/${docId} skipped:`, e);
+                      console.warn(`Upward sync push for ${storeName}/${docId} skipped:`, e);
                     }
-                    return;
                   }
-                }
-                // Guard gallery content against stale empty sync wiping out user albums
-                if (storeName === "cms_content" && (docId === "gallery_images" || docId === "gallery_albums")) {
-                  try {
-                    const localVal = localDoc && localDoc.value ? JSON.parse(localDoc.value) : [];
-                    const remoteVal = docData.value ? JSON.parse(docData.value) : [];
-                    if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
-                      console.log(`Preserving local ${docId} against empty remote cloud sync.`);
-                      try {
-                        await firestore.collection(storeName).doc(docId).set(localDoc);
-                      } catch (e) {}
-                      return;
-                    }
-                  } catch (e) {}
+                  return;
                 }
               }
               await db.putLocal(storeName, docData);
@@ -1277,26 +1354,24 @@ function startFirestoreSync() {
       firestore.collection(storeName).onSnapshot(snapshot => {
         snapshot.docChanges().forEach(async (change) => {
           const docData = change.doc.data();
-          const docId = change.doc.id;
+          const docId = change.doc.id || db.getDocId(storeName, docData);
           
           if (change.type === "added" || change.type === "modified") {
             const localDoc = await db.get(storeName, docId);
-            if (localDoc && localDoc.updated_at && docData.updated_at) {
-              const localTime = new Date(localDoc.updated_at).getTime();
-              const remoteTime = new Date(docData.updated_at).getTime();
-              if (localTime > remoteTime) {
-                // Local is newer than incoming change, ignore stale update
-                return;
+            if (shouldKeepLocalDoc(storeName, docId, localDoc, docData)) {
+              // Local is newer or protected; heal cloud if local is strictly newer or pending
+              const localTime = getDocTimestamp(localDoc);
+              const remoteTime = getDocTimestamp(docData);
+              if (localTime > remoteTime || localDoc.synced === false) {
+                try {
+                  if (navigator.onLine) {
+                    await firestore.collection(storeName).doc(docId).set(localDoc);
+                    localDoc.synced = true;
+                    await db.putLocal(storeName, localDoc);
+                  }
+                } catch (e) {}
               }
-            }
-            if (storeName === "cms_content" && (docId === "gallery_images" || docId === "gallery_albums")) {
-              try {
-                const localVal = localDoc && localDoc.value ? JSON.parse(localDoc.value) : [];
-                const remoteVal = docData.value ? JSON.parse(docData.value) : [];
-                if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
-                  return;
-                }
-              } catch (e) {}
+              return;
             }
             await db.putLocal(storeName, docData);
             const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });

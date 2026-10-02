@@ -4165,11 +4165,12 @@ async function renderWebsiteCMS(container) {
       const missionVal = sanitizeXSS(document.getElementById("cms-input-mission").value);
       const visionVal = sanitizeXSS(document.getElementById("cms-input-vision").value);
 
-      await window.db.put("cms_content", { content_key: "school_name", value: nameVal });
-      await window.db.put("cms_content", { content_key: "hero_title", value: titleVal });
-      await window.db.put("cms_content", { content_key: "hero_subtitle", value: subVal });
-      await window.db.put("cms_content", { content_key: "mission_statement", value: missionVal });
-      await window.db.put("cms_content", { content_key: "vision_statement", value: visionVal });
+      const now = new Date().toISOString();
+      await window.db.put("cms_content", { content_key: "school_name", value: nameVal, updated_at: now });
+      await window.db.put("cms_content", { content_key: "hero_title", value: titleVal, updated_at: now });
+      await window.db.put("cms_content", { content_key: "hero_subtitle", value: subVal, updated_at: now });
+      await window.db.put("cms_content", { content_key: "mission_statement", value: missionVal, updated_at: now });
+      await window.db.put("cms_content", { content_key: "vision_statement", value: visionVal, updated_at: now });
 
       showToast("Landing Page Copy successfully updated & sanitized!", "success");
     });
@@ -4304,7 +4305,7 @@ async function renderWebsiteCMS(container) {
           const item = news[idx];
           if (confirm(`Are you sure you want to delete announcement "${item ? item.title : 'this post'}" from the website?`)) {
             news.splice(idx, 1);
-            await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news) });
+            await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news), updated_at: new Date().toISOString() });
             showToast("Announcement deleted from website.", "info");
             loadCMSAnnouncements();
           }
@@ -4335,7 +4336,7 @@ async function renderWebsiteCMS(container) {
         };
 
         news.unshift(newPost);
-        await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news) });
+        await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news), updated_at: new Date().toISOString() });
 
         showToast("New announcement published to website!", "success");
         formAddNews.reset();
@@ -4360,7 +4361,7 @@ async function renderWebsiteCMS(container) {
           news[idx].date = date;
           news[idx].summary = summary;
 
-          await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news) });
+          await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news), updated_at: new Date().toISOString() });
           showToast("Announcement updated successfully!", "success");
           newsEditModal.classList.add("portal-hidden");
           loadCMSAnnouncements();
@@ -4377,6 +4378,8 @@ async function renderWebsiteCMS(container) {
       btnCancelNewsEdit.onclick = () => newsEditModal.classList.add("portal-hidden");
     }
 
+    window._refreshCMSAnnouncements = loadCMSAnnouncements;
+    window._refreshCMSThumbnails = renderCMSThumbnails;
     loadCMSAnnouncements();
 
   } catch (err) {
@@ -16391,6 +16394,16 @@ window.addEventListener("dbSyncUpdate", async (e) => {
         window._refreshAcademicCalendar();
       }
     }
+
+    // 8. Live Website CMS & Announcements
+    if (storeName === "cms_content") {
+      if (typeof window._refreshCMSAnnouncements === "function") {
+        window._refreshCMSAnnouncements();
+      }
+      if (typeof window._refreshCMSThumbnails === "function") {
+        window._refreshCMSThumbnails();
+      }
+    }
   } catch (syncErr) {
     console.warn("Cross-device UI sync handler skipped:", syncErr);
   }
@@ -16422,33 +16435,34 @@ async function renderAcademicCalendar(container) {
 
     if (!cal.canonical_terms) {
       cal.canonical_terms = {
-        academic_year: "2026/2027",
+        academic_year: cal.academic_year || "2026/2027",
         term1: {
-          start_date: "2026-01-05",
-          end_date: "2026-04-15",
-          midterm_start: "2026-02-16",
-          midterm_end: "2026-02-20",
+          start_date: cal.term1_start || "2026-09-08",
+          end_date: cal.term1_end || "2026-12-17",
+          midterm_start: cal.midterm_start || "2026-10-19",
+          midterm_end: cal.midterm_end || "2026-10-23",
           public_holidays: 2,
-          net_days: 68
+          net_days: 70
         },
         term2: {
-          start_date: "2026-05-04",
-          end_date: "2026-07-31",
-          midterm_start: "2026-06-15",
-          midterm_end: "2026-06-19",
+          start_date: cal.term2_start || "2027-01-05",
+          end_date: cal.term2_end || "2027-03-25",
+          midterm_start: "2027-02-15",
+          midterm_end: "2027-02-19",
           public_holidays: 3,
-          net_days: 60
+          net_days: 55
         },
         term3: {
-          start_date: "2026-08-03",
-          end_date: "2026-12-11",
-          midterm_start: "2026-10-12",
-          midterm_end: "2026-10-16",
+          start_date: cal.term3_start || "2027-04-20",
+          end_date: cal.term3_end || "2027-07-22",
+          midterm_start: "2027-06-07",
+          midterm_end: "2027-06-11",
           public_holidays: 2,
-          net_days: 88
+          net_days: 65
         }
       };
       cal.calendar_id = "main-calendar";
+      cal.updated_at = new Date().toISOString();
       await window.db.put("academic_calendar", cal);
     }
     const ct = cal.canonical_terms;
@@ -16777,8 +16791,30 @@ async function renderAcademicCalendar(container) {
             net_days: c3.netSchoolDays
           }
         };
+        freshCal.academic_year = acadYear;
+        freshCal.term1_start = t1Start;
+        freshCal.term1_end = t1End;
+        freshCal.term2_start = t2Start;
+        freshCal.term2_end = t2End;
+        freshCal.term3_start = t3Start;
+        freshCal.term3_end = t3End;
+        freshCal.midterm_start = t1MidStart;
+        freshCal.midterm_end = t1MidEnd;
+
+        // Synchronize matching events in events list if present
+        if (Array.isArray(freshCal.events)) {
+          const e1 = freshCal.events.find(e => /term\s*1/i.test(e.name));
+          if (e1) { e1.start_date = t1Start; e1.end_date = t1End; }
+          const e2 = freshCal.events.find(e => /term\s*2/i.test(e.name));
+          if (e2) { e2.start_date = t2Start; e2.end_date = t2End; }
+          const e3 = freshCal.events.find(e => /term\s*3/i.test(e.name));
+          if (e3) { e3.start_date = t3Start; e3.end_date = t3End; }
+        }
+
         freshCal.calendar_id = "main-calendar";
+        freshCal.updated_at = new Date().toISOString();
         await window.db.put("academic_calendar", freshCal);
+        await initAcademicCalendarCache();
 
         if (window.api && typeof window.api.syncToFirebase === "function") {
           window.api.syncToFirebase("academic_calendar", freshCal).catch(() => {});
@@ -16958,6 +16994,8 @@ async function renderAcademicCalendar(container) {
               const t3 = currentCal.events.find(e => /term\s*3/i.test(e.name));
               if (t3) { currentCal.term3_start = t3.start_date; currentCal.term3_end = t3.end_date || t3.start_date; }
 
+              currentCal.calendar_id = "main-calendar";
+              currentCal.updated_at = new Date().toISOString();
               await window.db.put("academic_calendar", currentCal);
               await initAcademicCalendarCache();
               showToast("Calendar event deleted successfully", "info");
@@ -16970,6 +17008,10 @@ async function renderAcademicCalendar(container) {
     };
 
     await loadEventsList();
+    window._refreshAcademicCalendar = async () => {
+      await loadEventsList();
+      if (typeof refreshCanonicalTermBadges === "function") refreshCanonicalTermBadges();
+    };
 
     if (form) {
       // Form Submit Handler (Add or Update)
@@ -17025,6 +17067,7 @@ async function renderAcademicCalendar(container) {
           if (t3) { freshCal.term3_start = t3.start_date; freshCal.term3_end = t3.end_date || t3.start_date; }
 
           freshCal.calendar_id = "main-calendar";
+          freshCal.updated_at = new Date().toISOString();
           await window.db.put("academic_calendar", freshCal);
           await initAcademicCalendarCache();
           resetEventForm();
