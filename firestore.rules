@@ -26,6 +26,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAuthenticated();
     }
+    match /cms_gallery_chunks/{chunkId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
     match /academic_calendar/{calId} {
       allow read: if true;
       allow write: if isAuthenticated();
@@ -108,6 +112,9 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
     match /subjects/{subjectId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /birthday_dispatches/{dispatchId} {
       allow read, write: if isAuthenticated();
     }
 

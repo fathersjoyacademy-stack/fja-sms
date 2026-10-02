@@ -88,11 +88,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Load and Render CMS contents from Database
   async function renderWebsiteCMSAndCalendar() {
     try {
+      if (window.db && typeof window.db.purgeLegacySampleCMSData === "function") {
+        await window.db.purgeLegacySampleCMSData();
+      }
+
       const nameKey = await window.db.get("cms_content", "school_name");
-    const titleKey = await window.db.get("cms_content", "hero_title");
-    const subKey = await window.db.get("cms_content", "hero_subtitle");
-    const missionKey = await window.db.get("cms_content", "mission_statement");
-    const visionKey = await window.db.get("cms_content", "vision_statement");
+      const titleKey = await window.db.get("cms_content", "hero_title");
+      const subKey = await window.db.get("cms_content", "hero_subtitle");
+      const missionKey = await window.db.get("cms_content", "mission_statement");
+      const visionKey = await window.db.get("cms_content", "vision_statement");
 
     if (nameKey) document.getElementById("cms-nav-school-name").innerText = nameKey.value;
     if (titleKey) document.getElementById("cms-hero-title").innerText = titleKey.value;
@@ -107,19 +111,47 @@ document.addEventListener("DOMContentLoaded", async () => {
       const container = document.getElementById("cms-values-container");
       container.innerHTML = values.map(val => `
         <div class="value-card">
-          <h4 style="color:var(--accent-primary); margin-bottom:0.5rem;">${val.title}</h4>
+          <h4 style="color:var(--accent-primary); margin-bottom:0.5rem; text-align:center;">${val.title}</h4>
           <p style="font-size:0.9rem; color:var(--text-secondary);">${val.desc}</p>
         </div>
       `).join("");
     }
 
     // Photo Gallery Grouping by Album
-    const galleryKey = await window.db.get("cms_content", "gallery_images");
-    if (galleryKey) {
-      const gallery = JSON.parse(galleryKey.value);
-      
+    let galleryKey = await window.db.get("cms_content", "gallery_images");
+    let gallery = (galleryKey && galleryKey.value) ? JSON.parse(galleryKey.value) : null;
+
+    const isMockGallery = gallery && Array.isArray(gallery) && gallery.some(item =>
+      (item.id && item.id.startsWith("img_demo_")) ||
+      (item.url && item.url.startsWith("data:image/svg+xml")) ||
+      (item.album && (item.album === "Digital Coding Lab" || item.album === "Science Experiments Lab" || item.album === "Sports Grounds"))
+    );
+
+    // Fallback to static gallery manifest if local database not populated yet or contains mock data
+    if (!gallery || !Array.isArray(gallery) || gallery.length === 0 || isMockGallery) {
+      try {
+        const resp = await fetch("./assets/gallery-data.json");
+        if (resp.ok) {
+          const fetched = await resp.json();
+          if (Array.isArray(fetched) && fetched.length > 0) {
+            gallery = fetched;
+            if (window.db && typeof window.db.putLocal === "function") {
+              await window.db.putLocal("cms_content", {
+                content_key: "gallery_images",
+                value: JSON.stringify(gallery),
+                updated_at: new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Static gallery fallback notice:", e);
+      }
+    }
+
+    if (gallery && Array.isArray(gallery) && gallery.length > 0) {
       // Feed uploaded CMS gallery photos into the live honeycomb background
-      if (Array.isArray(gallery) && gallery.length > 0 && window.schoolHoneycomb) {
+      if (gallery.length > 0 && window.schoolHoneycomb) {
         const cmsPhotoUrls = gallery.map(item => item.url).filter(Boolean);
         if (cmsPhotoUrls.length > 0) {
           window.schoolHoneycomb.setImages(cmsPhotoUrls);
@@ -165,20 +197,47 @@ document.addEventListener("DOMContentLoaded", async () => {
           });
         }
       }
+    } else {
+      const container = document.getElementById("cms-gallery-container");
+      if (container) {
+        container.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); font-size: 0.95rem;">
+            Campus photo galleries will be available soon. Check back shortly!
+          </div>
+        `;
+      }
     }
 
     // News Feed
     const newsKey = await window.db.get("cms_content", "news_feed");
-    if (newsKey) {
-      const news = JSON.parse(newsKey.value);
-      const container = document.getElementById("cms-news-container");
-      container.innerHTML = news.map(item => `
-        <div class="news-card">
-          <span class="news-meta">Published: ${item.date}</span>
-          <h3 style="margin-bottom:0.5rem; font-family:var(--font-family-display);">${item.title}</h3>
-          <p style="font-size:0.9rem; color:var(--text-secondary);">${item.summary}</p>
-        </div>
-      `).join("");
+    const containerNews = document.getElementById("cms-news-container");
+    if (containerNews) {
+      let news = (newsKey && newsKey.value) ? JSON.parse(newsKey.value) : [];
+      if (Array.isArray(news)) {
+        news = news.filter(item =>
+          item.id !== "news-1" &&
+          item.id !== "news-2" &&
+          item.id !== "news-3" &&
+          item.title !== "New E-Library Portal Launched" &&
+          item.title !== "Upcoming PTA General Meeting" &&
+          item.title !== "Inter-Houses Athletics Competition"
+        );
+      }
+      if (!Array.isArray(news) || news.length === 0) {
+        containerNews.innerHTML = `
+          <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted); font-size:0.95rem;">
+            No announcements published at this time. Please check back shortly.
+          </div>
+        `;
+      } else {
+        containerNews.innerHTML = news.map(item => `
+          <div class="news-card">
+            <span class="news-meta" style="text-align:center; display:block;">Published: ${item.date}</span>
+            <h3 style="margin-bottom:0.5rem; font-family:var(--font-family-display); text-align:center;">${item.title}</h3>
+            <p style="font-size:0.9rem; color:var(--text-secondary);">${item.summary}</p>
+          </div>
+        `).join("");
+      }
     }
 
     // Leadership Team
@@ -191,7 +250,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           <div style="width:70px; height:70px; border-radius:50%; background:var(--accent-primary); display:flex; align-items:center; justify-content:center; margin:0 auto 1rem; color:white; font-size:1.5rem; font-weight:bold;">
             ${member.name.split(" ").pop().substring(0, 1)}
           </div>
-          <h4 style="margin-bottom:0.25rem;">${member.name}</h4>
+          <h4 style="margin-bottom:0.25rem; text-align:center;">${member.name}</h4>
           <span style="font-size:0.8rem; color:var(--accent-secondary); font-weight:700;">${member.role}</span>
         </div>
       `).join("");
@@ -202,20 +261,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const eventsContainer = document.getElementById("website-calendar-events-container");
     
     if (eventsContainer) {
-      let events = (calendarKey && calendarKey.events && Array.isArray(calendarKey.events)) ? calendarKey.events : null;
-      
-      // Fallback if no events configured
-      if (!events || events.length === 0) {
-        const cal = calendarKey || {};
-        events = [
-          { name: "2025/2026 First Academic Term", start_date: cal.term1_start || "2026-01-05", end_date: cal.term1_end || "2026-04-15", time: "", notes: "" },
-          { name: "2025/2026 Second Academic Term", start_date: cal.term2_start || "2026-05-04", end_date: cal.term2_end || "2026-07-31", time: "", notes: "" },
-          { name: "2025/2026 Third Academic Term", start_date: cal.term3_start || "2026-08-03", end_date: cal.term3_end || "2026-12-15", time: "", notes: "" },
-          { name: "PTA General Assembly & Parents Forum", start_date: cal.pta_date || "2026-09-19", end_date: cal.pta_date || "2026-09-19", time: "10:00", notes: "General assembly in the school auditorium." },
-          { name: "Mid-Term Vacation Break", start_date: cal.midterm_start || "2026-10-12", end_date: cal.midterm_end || "2026-10-16", time: "", notes: "" },
-          { name: "Term Promotional & Final Examinations Week", start_date: cal.exam_start || "2026-11-30", end_date: cal.exam_end || "2026-12-04", time: "", notes: "" }
-        ];
-      }
+      let events = (calendarKey && Array.isArray(calendarKey.events)) ? [...calendarKey.events] : [];
 
       // Auto-arrange for the earliest start date to lead the list
       events.sort((a, b) => {
@@ -359,7 +405,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     const childFullName = `${firstName} ${otherName ? otherName + ' ' : ''}${surname}`.trim();
     const primaryContactName = fatherName || motherName || `Parent of ${firstName}`;
 
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.dataset.origText = submitBtn.innerHTML;
+      submitBtn.innerHTML = "Submitting Application...";
+    }
+
     try {
+      // Duplicate check: verify if an applicant/student with identical name & primary phone exists
+      const existingUsers = await window.db.getAll("users") || [];
+      const normPhone = window.api ? window.api.normalizeGhanaPhone(primaryPhone) : primaryPhone.replace(/\D/g, "");
+      const cleanFirst = firstName.trim().toLowerCase();
+      const cleanOther = otherName.trim().toLowerCase();
+      const cleanLast = surname.trim().toLowerCase();
+
+      const dup = existingUsers.find(u => {
+        if (!u || u.status === "ARCHIVED") return false;
+        if (u.role === "Parent") return false;
+        const uFirst = (u.first_name || "").trim().toLowerCase();
+        const uOther = (u.other_name || "").trim().toLowerCase();
+        const uLast = (u.last_name || "").trim().toLowerCase();
+        const uNormPhone = window.api ? window.api.normalizeGhanaPhone(u.phone) : (u.phone || "").replace(/\D/g, "");
+        const nameMatch = uFirst === cleanFirst && uOther === cleanOther && uLast === cleanLast;
+        const phoneMatch = Boolean(normPhone && uNormPhone && normPhone === uNormPhone);
+        return nameMatch && phoneMatch;
+      });
+
+      if (dup) {
+        alert(`An admissions application or student record already exists for "${childFullName}" with contact number "${primaryPhone}". If you need assistance, please contact the administration office.`);
+        showToast("Application already on file for this candidate.", "warning");
+        return;
+      }
+
       const student_id = "u-pending-" + Date.now();
       
       const newUser = {
@@ -442,6 +520,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       console.error("Admissions submission error:", err);
       showToast("Error processing admissions intake.", "danger");
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.origText || "Submit Application";
+      }
     }
   });
 });

@@ -185,6 +185,8 @@ async function executeDailyBirthdayScan(db, options = {}) {
     if (status !== "ACTIVE") return;
     if (!u.date_of_birth) return;
     const dob = String(u.date_of_birth).trim();
+    // Parent accounts do not receive student/staff birthday SMS
+    if (u.role === "Parent") return;
     if (dob.length >= 10 && dob.substring(5, 10) === currentMMDD) {
       celebrants.push({
         id: doc.id,
@@ -199,7 +201,7 @@ async function executeDailyBirthdayScan(db, options = {}) {
   });
 
   const studentsCount = celebrants.filter(c => c.role === "Student").length;
-  const staffCount = celebrants.filter(c => c.role !== "Student").length;
+  const staffCount = celebrants.filter(c => c.role !== "Student" && c.role !== "Parent").length;
 
   console.log(`[Birthday Scan] Identified ${celebrants.length} total celebrant(s): ${studentsCount} student(s) and ${staffCount} staff member(s).`);
 

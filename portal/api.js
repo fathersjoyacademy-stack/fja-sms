@@ -364,6 +364,33 @@ const api = {
         existingWithPhone.map(u => `${u.first_name} ${u.last_name} (${u.role})`).join(", "));
     }
 
+    // 1. DUPLICATE ACCOUNT CHECK:
+    // Alert and reject if a user shares the exact same first, middle (other_name), and last name
+    // with the same primary contact number.
+    // Note: Parent records and emergency contacts for staff are ignored as they can be shared across multiple users.
+    const normPhone = this.normalizeGhanaPhone(userPayload.phone);
+    const cleanFirst = (userPayload.first_name || "").trim().toLowerCase();
+    const cleanOther = (userPayload.other_name || "").trim().toLowerCase();
+    const cleanLast = (userPayload.last_name || "").trim().toLowerCase();
+
+    const duplicateUser = users.find(u => {
+      if (!u || u.status === "ARCHIVED") return false;
+      if (u.role === "Parent" && userPayload.role !== "Parent") return false;
+
+      const uFirst = (u.first_name || "").trim().toLowerCase();
+      const uOther = (u.other_name || "").trim().toLowerCase();
+      const uLast = (u.last_name || "").trim().toLowerCase();
+      const uNormPhone = this.normalizeGhanaPhone(u.phone);
+
+      const nameMatch = uFirst === cleanFirst && uOther === cleanOther && uLast === cleanLast;
+      const phoneMatch = Boolean(normPhone && uNormPhone && normPhone === uNormPhone);
+      return nameMatch && phoneMatch;
+    });
+
+    if (duplicateUser) {
+      throw new Error(`Account already exists: A user record (${duplicateUser.uid} - ${duplicateUser.role}) already exists with the name "${userPayload.first_name} ${userPayload.other_name ? userPayload.other_name + ' ' : ''}${userPayload.last_name}" and contact number "${userPayload.phone}".`);
+    }
+
     // Auto generate UID
     const uid = await this.generateUID(userPayload.role);
     const userId = "u-" + Math.random().toString(36).substring(2, 11);
@@ -512,14 +539,32 @@ const api = {
 
     // Generate link for password initialization
     if (newUser.role !== "Other") {
-      const origin = (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "https://fja-sms.web.app";
+      const origin = (typeof window !== "undefined" && window.location && window.location.origin && window.location.origin !== "null") ? window.location.origin : "https://fja-sms.web.app";
       const setupLink = `${origin}/portal/index.html?action=set-password&uid=${uid}&userId=${userId}`;
 
+      // Resolve contact phone
+      let dispatchPhone = newUser.phone;
+      if (!dispatchPhone && profilePayload) {
+        dispatchPhone = profilePayload.father_phone || profilePayload.mother_phone || "";
+        if (!dispatchPhone && profilePayload.emergency_contact) {
+          try {
+            const em = typeof profilePayload.emergency_contact === "string" ? JSON.parse(profilePayload.emergency_contact) : profilePayload.emergency_contact;
+            dispatchPhone = em.phone || (em.primary && em.primary.phone) || "";
+          } catch (e) {}
+        }
+      }
+
       // Dispatch Hubtel SMS containing the setup link
-      await this.sendHubtelSMS(
-        newUser.phone,
-        `Hello ${newUser.first_name}, your Father's Joy Academy account is active. Login ID: ${uid}. To customize your password for the portal, visit: ${setupLink}`
-      );
+      if (dispatchPhone) {
+        try {
+          await this.sendHubtelSMS(
+            dispatchPhone,
+            `Hello ${newUser.first_name}, your Father's Joy Academy account is active. Login ID: ${uid}. To set your password for the portal, visit: ${setupLink}`
+          );
+        } catch (smsErr) {
+          console.warn("Hubtel password setup SMS dispatch notice:", smsErr);
+        }
+      }
     }
 
     return newUser;
@@ -538,13 +583,16 @@ const api = {
     await window.db.put("users", user);
 
     // Generate link for password setup
-    const setupLink = `${window.location.origin}/portal/index.html?action=set-password&uid=${user.uid}&userId=${userId}`;
+    const origin = (typeof window !== "undefined" && window.location && window.location.origin && window.location.origin !== "null") ? window.location.origin : "https://fja-sms.web.app";
+    const setupLink = `${origin}/portal/index.html?action=set-password&uid=${user.uid}&userId=${userId}`;
 
     // Dispatch Hubtel SMS containing the setup link
-    await this.sendHubtelSMS(
-      user.phone,
-      `Hello, your school account password has been reset. You can set your new password using this link: ${setupLink}`
-    );
+    if (user.phone) {
+      await this.sendHubtelSMS(
+        user.phone,
+        `Hello ${user.first_name || ''}, your Father's Joy Academy portal account password has been reset. Login ID: ${user.uid}. To set your new password, visit: ${setupLink}`
+      );
+    }
 
     return setupLink;
   },
@@ -662,6 +710,7 @@ const api = {
   // --- SMS & Communications Engine ---
   smsQueue: [],
   pushQueue: [],
+  _recentDispatches: new Map(),
 
   /**
    * Ghanaian Phone Number Normalizer
@@ -683,12 +732,34 @@ const api = {
   /**
    * Unified SMS Dispatcher
    * - Normalizes phone to international Ghana standard (233...)
+   * - Deduplicates identical messages within 3-minute window (avoids duplicate billing)
+   * - Supports selective retries for only failed recipients via options.forceRetry
    * - Securely invokes Firebase Cloud Function (sendSchoolSMS) with HTTP gateway fallback
    * - Tracks Hubtel response status (including status 12 for payment required)
    * - Updates local queue, dispatches sms-logged event, and syncs to In-App Notification Center
    */
-  async sendSMS(phone, message) {
+  async sendSMS(phone, message, options = {}) {
     const normalizedPhone = this.normalizeGhanaPhone(phone) || phone;
+    const cleanMsg = String(message || "").trim();
+
+    // Deduplication check: prevent sending identical SMS twice to the same user
+    const dedupeKey = `${normalizedPhone}_${cleanMsg}`;
+    const now = Date.now();
+    const recent = this._recentDispatches.get(dedupeKey);
+    if (recent && (now - recent.timestamp < 180000)) {
+      if (recent.success && !options?.forceRetry) {
+        console.warn(`[SMS DEDUPLICATION] Duplicate SMS suppressed for ${normalizedPhone} within 3m window: "${cleanMsg.substring(0, 35)}..."`);
+        return {
+          success: true,
+          status: 0,
+          statusDescription: "Suppressed duplicate SMS (already sent to recipient)",
+          phone: normalizedPhone,
+          messageId: recent.messageId || null,
+          duplicateSuppressed: true
+        };
+      }
+    }
+
     let gatewayResult = null;
 
     // Dispatch via backend Firebase Cloud Function if online
@@ -831,15 +902,29 @@ const api = {
       console.warn("Failed to write SMS copy to notification center:", err);
     }
 
-    return isSuccess;
+    this._recentDispatches.set(dedupeKey, {
+      timestamp: Date.now(),
+      success: isSuccess,
+      status: statusDesc,
+      messageId: gatewayResult?.messageId || null
+    });
+
+    return {
+      success: isSuccess,
+      status: gatewayResult?.status !== undefined ? gatewayResult.status : (isSuccess ? 0 : -1),
+      statusDescription: statusDesc,
+      phone: normalizedPhone,
+      messageId: gatewayResult?.messageId || null,
+      duplicateSuppressed: false
+    };
   },
 
-  async simulateSMS(phone, message) {
-    return this.sendSMS(phone, message);
+  async simulateSMS(phone, message, options) {
+    return this.sendSMS(phone, message, options);
   },
 
-  async sendHubtelSMS(phone, message) {
-    return this.sendSMS(phone, message);
+  async sendHubtelSMS(phone, message, options) {
+    return this.sendSMS(phone, message, options);
   },
 
   simulatePush(title, body) {

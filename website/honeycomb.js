@@ -6,41 +6,44 @@
  * Optimized for desktop (1920x1080) and mobile (1080x1920) with zero scroll lag.
  */
 
-// Curated academic & campus imagery (WebP, ~25KB each, no distortion)
-const DEFAULT_SCHOOL_IMAGES = [
-  // Classrooms & Collaborative Learning
-  'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1580582932707-520aed937b7b?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=400&q=80',
-  
-  // Science, Robotics & STEM Lab
-  'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1581092335397-9583fe92d232?auto=format&fit=crop&w=400&q=80',
+// Dynamic preloaded real gallery photos from static manifest or indexedDB
+let REAL_GALLERY_IMAGES = [];
 
-  // Library & Reading
-  'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1568667256549-094345857637?auto=format&fit=crop&w=400&q=80',
+async function fetchRealGalleryImages() {
+  if (REAL_GALLERY_IMAGES.length > 0) return REAL_GALLERY_IMAGES;
+  try {
+    if (window.db && typeof window.db.get === "function") {
+      const gKey = await window.db.get("cms_content", "gallery_images");
+      if (gKey && gKey.value) {
+        const parsed = JSON.parse(gKey.value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          REAL_GALLERY_IMAGES = parsed.map(item => item.url).filter(Boolean);
+          return REAL_GALLERY_IMAGES;
+        }
+      }
+    }
+  } catch (e) {}
 
-  // Sports, Athletics & Campus Life
-  'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1517649763962-0c623266ddc0?auto=format&fit=crop&w=400&q=80',
+  try {
+    const resp = await fetch("./assets/gallery-data.json");
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        REAL_GALLERY_IMAGES = data.map(item => item.url).filter(Boolean);
+        return REAL_GALLERY_IMAGES;
+      }
+    }
+  } catch (e) {}
 
-  // Arts, Music & Creative Expression
-  'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1460518451285-97b6aa326961?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1460661419201-fd4cecdf8a8b?auto=format&fit=crop&w=400&q=80',
+  return REAL_GALLERY_IMAGES;
+}
 
-  // Graduation & Achievement
-  'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=400&q=80',
-  'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?auto=format&fit=crop&w=400&q=80'
-];
+// Pre-fetch immediately in background on script evaluation
+fetchRealGalleryImages().then(imgs => {
+  if (imgs && imgs.length > 0 && window.schoolHoneycomb) {
+    window.schoolHoneycomb.setImages(imgs);
+  }
+});
 
 class SchoolHoneycombEngine {
   constructor(container, options = {}) {
@@ -51,7 +54,7 @@ class SchoolHoneycombEngine {
       fadeDuration: 1500,     // Smooth CSS transition time (ms)
       intervalSpeed: 1400,    // Time between transition ticks
       concurrentFades: 2,     // Max cells fading concurrently
-      images: [...DEFAULT_SCHOOL_IMAGES]
+      images: REAL_GALLERY_IMAGES.length > 0 ? [...REAL_GALLERY_IMAGES] : []
     }, options);
 
     this.cells = [];
@@ -64,8 +67,14 @@ class SchoolHoneycombEngine {
     this.init();
   }
 
-  init() {
-    this.preloadBatch(this.options.images.slice(0, 12));
+  async init() {
+    if (this.options.images.length === 0) {
+      const imgs = await fetchRealGalleryImages();
+      if (imgs && imgs.length > 0) {
+        this.options.images = [...imgs];
+      }
+    }
+    this.preloadBatch(this.options.images.slice(0, 15));
     this.setupResizeObserver();
     this.setupVisibilityListener();
     this.rebuildGrid();
@@ -74,9 +83,25 @@ class SchoolHoneycombEngine {
 
   setImages(newImages) {
     if (!newImages || newImages.length === 0) return;
-    // Combine custom/CMS images with fallback images to maintain rich diversity
-    this.options.images = Array.from(new Set([...newImages, ...DEFAULT_SCHOOL_IMAGES]));
-    this.preloadBatch(newImages.slice(0, 10));
+    // Strictly replace with real gallery images - NO DEFAULT SYSTEM/UNSPLASH PICTURES!
+    this.options.images = Array.from(new Set(newImages.filter(Boolean)));
+    this.refreshCellImages();
+    this.preloadBatch(this.options.images.slice(0, 15));
+  }
+
+  refreshCellImages() {
+    if (!this.cells || this.cells.length === 0 || !this.options.images || this.options.images.length === 0) return;
+    let idx = 0;
+    this.cells.forEach(cell => {
+      if (!cell.currentImage || !this.options.images.includes(cell.currentImage)) {
+        const nextImg = this.options.images[idx % this.options.images.length];
+        idx++;
+        cell.currentImage = nextImg;
+        if (cell.layerA) cell.layerA.src = nextImg;
+        if (cell.layerB) cell.layerB.src = '';
+        cell.activeLayer = 'A';
+      }
+    });
   }
 
   preloadBatch(urls) {
@@ -171,11 +196,14 @@ class SchoolHoneycombEngine {
         const inner = document.createElement('div');
         inner.className = 'school-hex-inner';
 
-        const initialImgUrl = this.getRandomImage();
+        const hasImages = this.options.images && this.options.images.length > 0;
+        const initialImgUrl = hasImages 
+          ? this.options.images[cellIndex % this.options.images.length] 
+          : '';
 
         const imgA = document.createElement('img');
         imgA.className = 'school-hex-img active';
-        imgA.src = initialImgUrl;
+        if (initialImgUrl) imgA.src = initialImgUrl;
         imgA.alt = '';
         imgA.loading = 'lazy';
 

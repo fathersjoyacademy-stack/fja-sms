@@ -30,6 +30,8 @@
           <a href="#gallery">Gallery</a>
           <a href="#news">News</a>
           <a href="#admissions">Admissions</a>
+          <a href="#events-calendar">Calendar</a>
+          <a href="#contact">Contact</a>
         </nav>
         <div class="landing-header-actions">
           <button id="btn-theme-toggle-public" class="btn-icon">🌓</button>
@@ -55,6 +57,7 @@
           <a href="#news" class="mobile-menu-link">Latest Announcements</a>
           <a href="#admissions" class="mobile-menu-link">Admissions Intake</a>
           <a href="#events-calendar" class="mobile-menu-link">Academic Calendar</a>
+          <a href="#contact" class="mobile-menu-link">Contact Us</a>
           <div class="mobile-menu-actions" style="margin-top:2rem; display:flex; flex-direction:column; gap:0.75rem;">
             <button id="btn-theme-toggle-mobile" class="btn btn-secondary" style="width:100%;">🌓 Toggle Theme</button>
             <button id="btn-portal-enter-mobile" class="btn btn-primary" style="width:100%;">Portal Login</button>
@@ -78,11 +81,11 @@
       <h2 class="section-title">Our Vision & Mission</h2>
       <div class="grid-2">
         <div class="value-card">
-          <h3 style="color:var(--accent-primary); margin-bottom:1rem;">Our Mission</h3>
+          <h3 style="color:var(--accent-primary); margin-bottom:1rem; text-align:center;">Our Mission</h3>
           <p id="cms-mission-text">To provide quality, child-centered education that empowers students to discover their creative capabilities and build sound ethical values.</p>
         </div>
         <div class="value-card">
-          <h3 style="color:var(--accent-secondary); margin-bottom:1rem;">Our Vision</h3>
+          <h3 style="color:var(--accent-secondary); margin-bottom:1rem; text-align:center;">Our Vision</h3>
           <p id="cms-vision-text">To be a premier learning institution of choice, molding leaders who blend academic excellence, ethical integrity, and technological innovation.</p>
         </div>
       </div>
@@ -126,7 +129,7 @@
       </h2>
       <div class="admissions-box portal-hidden" id="admissions-form-container" style="transition: max-height 0.3s ease-out; overflow: hidden;">
         <form id="form-public-admission" style="display:flex; flex-direction:column; gap:1.25rem;">
-          <h4 style="margin:0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary);">1. Child's Personal Profile</h4>
+          <h4 style="margin:0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary); text-align:center;">1. Child's Personal Profile</h4>
           <div class="grid-3">
             <div class="form-group">
               <label class="form-label">Child's First Name *</label>
@@ -184,7 +187,7 @@
             </div>
           </div>
 
-          <h4 style="margin:0.5rem 0 0 0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary);">2. Father's Details</h4>
+          <h4 style="margin:0.5rem 0 0 0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary); text-align:center;">2. Father's Details</h4>
           <div class="grid-3">
             <div class="form-group">
               <label class="form-label">Father's Full Name</label>
@@ -200,7 +203,7 @@
             </div>
           </div>
 
-          <h4 style="margin:0.5rem 0 0 0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary);">3. Mother's Details</h4>
+          <h4 style="margin:0.5rem 0 0 0; border-bottom:1px solid var(--border-color); padding-bottom:0.4rem; color:var(--accent-primary); text-align:center;">3. Mother's Details</h4>
           <div class="grid-3">
             <div class="form-group">
               <label class="form-label">Mother's Full Name</label>
@@ -235,12 +238,45 @@
       </div>
     </section>
 
+    <!-- Contact Us Section -->
+    <section id="contact" class="landing-container">
+      <h2 class="section-title">Contact Us</h2>
+      <div class="admissions-box" style="padding: 2.25rem;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.75rem;">
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="display:flex; align-items:center; gap:0.6rem; color:var(--accent-primary); font-weight:700; font-size:1.05rem;">
+              <span>📍</span> Campus Location
+            </div>
+            <p style="margin:0; color:var(--text-secondary); line-height:1.5;">Father's Joy Academy<br>Abura Dunkwa, Central Region - Ghana</p>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="display:flex; align-items:center; gap:0.6rem; color:var(--accent-primary); font-weight:700; font-size:1.05rem;">
+              <span>📞</span> Direct Phone & WhatsApp
+            </div>
+            <p style="margin:0; line-height:1.6;">
+              <a href="tel:+233242321696" style="color:var(--text-primary); text-decoration:none; font-weight:600; display:block;">+233 24 232 1696</a>
+              <a href="tel:+233509706080" style="color:var(--text-primary); text-decoration:none; font-weight:600; display:block;">+233 50 970 6080</a>
+            </p>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="display:flex; align-items:center; gap:0.6rem; color:var(--accent-primary); font-weight:700; font-size:1.05rem;">
+              <span>⏰</span> Office & Administration Hours
+            </div>
+            <p style="margin:0; color:var(--text-secondary); line-height:1.5;">
+              Monday – Friday: 7:30 AM – 4:30 PM GMT<br>
+              <span style="font-size:0.85rem; color:var(--text-muted);">Weekends & Public Holidays: Closed</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Footer -->
     <footer style="background:var(--bg-secondary); border-top:1px solid var(--border-color); text-align:center; padding:2.5rem 1rem; color:var(--text-muted)">
-      <p style="font-weight:800; font-size:1.1rem; color:var(--text-primary); margin:0 0 0.25rem 0; letter-spacing:0.5px; text-transform:uppercase;">FATHER'S JOY ACADEMY</p>
-      <p style="margin:0 0 0.25rem 0; font-weight:600; color:var(--text-secondary); font-size:0.9rem;">ABURA DUNKWA, C/R - GHANA.</p>
-      <p style="margin:0 0 1rem 0; font-weight:600; color:var(--accent-primary); font-size:0.9rem;">0242321696 / 0509706080</p>
-      <p style="margin:0; font-size:0.8rem;">&copy; 2026 Father's Joy Academy. All Rights Reserved. Powered by Offline-First PWA.</p>
+      <p style="margin:0 0 0.5rem 0; font-size:0.9rem; font-weight:600; color:var(--text-secondary);">&copy; 2026 Father's Joy Academy. All Rights Reserved.</p>
+      <p style="margin:0; font-size:0.85rem; color:var(--text-secondary);">Developed and designed by Bibinii Tech <a href="tel:+233544737870" style="color:var(--accent-primary); font-weight:600; text-decoration:none;">+233 544 73 78 70</a></p>
     </footer>
   </div>
 

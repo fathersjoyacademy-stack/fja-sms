@@ -1,11 +1,11 @@
 // db.js - IndexedDB Engine & Seeding System
 
 const DB_NAME = "SchoolManagementDB";
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 let dbInstance = null;
 
 // Clean-slate synchronization barrier (Forces client browsers to wipe stale demo IndexedDB & sessions)
-const CLEAN_SLATE_EPOCH = "2026-10-01-clean-slate-v1";
+const CLEAN_SLATE_EPOCH = "2026-10-02-clean-slate-v3";
 
 async function checkCleanSlateEpoch() {
   if (typeof localStorage !== "undefined" && localStorage.getItem("fja_clean_slate_epoch") !== CLEAN_SLATE_EPOCH) {
@@ -231,8 +231,169 @@ async function initDB() {
         const subStore = db.createObjectStore("subjects", { keyPath: "subject_id" });
         subStore.createIndex("subject_name", "subject_name", { unique: false });
       }
+
+      // 32. Birthday Dispatches Store (Centralized daily idempotency)
+      if (!db.objectStoreNames.contains("birthday_dispatches")) {
+        const bdayStore = db.createObjectStore("birthday_dispatches", { keyPath: "dispatch_id" });
+        bdayStore.createIndex("date", "date", { unique: false });
+        bdayStore.createIndex("user_id", "user_id", { unique: false });
+        bdayStore.createIndex("status", "status", { unique: false });
+      }
     };
   });
+}
+
+// Firebase Auth Guard: ensure anonymous auth is resolved before Firestore writes
+let authPromise = null;
+async function ensureFirebaseAuth() {
+  if (typeof firebase === "undefined" || !firebase.auth) return null;
+  const auth = firebase.auth();
+  if (auth.currentUser) return auth.currentUser;
+  if (authPromise) return authPromise;
+
+  authPromise = new Promise((resolve) => {
+    let resolved = false;
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user && !resolved) {
+        resolved = true;
+        unsubscribe();
+        resolve(user);
+      }
+    });
+    auth.signInAnonymously().catch((err) => {
+      console.warn("Anonymous auth notice:", err ? err.message || err : "failed");
+      if (!resolved) {
+        resolved = true;
+        resolve(auth.currentUser);
+      }
+    });
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(auth.currentUser);
+      }
+    }, 2500);
+  });
+  return authPromise;
+}
+
+// Firestore Document Limit Guard (~1MB limit per document):
+// Splits large gallery images collections into <800KB chunk documents in cms_gallery_chunks
+const GALLERY_CHUNK_SIZE = 8; // 8 photos per chunk (~650KB), well below 1,048,576 bytes
+
+async function syncGalleryImagesToFirestore(obj) {
+  if (typeof firebase === "undefined" || !firebase.firestore) return;
+  await ensureFirebaseAuth();
+  const firestore = firebase.firestore();
+
+  let gallery = [];
+  try {
+    gallery = typeof obj.value === "string" ? JSON.parse(obj.value) : (Array.isArray(obj.value) ? obj.value : []);
+  } catch (e) {
+    gallery = [];
+  }
+
+  const updatedAt = obj.updated_at || new Date().toISOString();
+  const totalPhotos = gallery.length;
+  const chunkCount = Math.ceil(totalPhotos / GALLERY_CHUNK_SIZE);
+
+  if (totalPhotos === 0) {
+    // Delete any existing chunks
+    try {
+      const existingChunks = await firestore.collection("cms_gallery_chunks").get();
+      const batch = firestore.batch();
+      existingChunks.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
+    } catch (e) {
+      console.warn("Clearing gallery chunks notice:", e);
+    }
+    // Set empty manifest
+    await firestore.collection("cms_content").doc("gallery_images").set({
+      content_key: "gallery_images",
+      is_chunked: true,
+      chunk_count: 0,
+      total_photos: 0,
+      value: "[]",
+      updated_at: updatedAt,
+      synced: true
+    });
+    return;
+  }
+
+  // Upload chunks in batches
+  for (let i = 0; i < chunkCount; i++) {
+    const chunkPhotos = gallery.slice(i * GALLERY_CHUNK_SIZE, (i + 1) * GALLERY_CHUNK_SIZE);
+    const chunkDocId = `chunk_${i}`;
+    await firestore.collection("cms_gallery_chunks").doc(chunkDocId).set({
+      chunk_index: i,
+      total_chunks: chunkCount,
+      photos: chunkPhotos,
+      updated_at: updatedAt
+    });
+  }
+
+  // Delete any excess chunks from previous larger uploads
+  try {
+    const existingChunks = await firestore.collection("cms_gallery_chunks").get();
+    const batch = firestore.batch();
+    let hasDeletions = false;
+    existingChunks.forEach(doc => {
+      const data = doc.data();
+      if (typeof data.chunk_index === "number" && data.chunk_index >= chunkCount) {
+        batch.delete(doc.ref);
+        hasDeletions = true;
+      }
+    });
+    if (hasDeletions) await batch.commit();
+  } catch (e) {}
+
+  // Update manifest in cms_content
+  await firestore.collection("cms_content").doc("gallery_images").set({
+    content_key: "gallery_images",
+    is_chunked: true,
+    chunk_count: chunkCount,
+    total_photos: totalPhotos,
+    updated_at: updatedAt,
+    synced: true
+  });
+  console.log(`Successfully synced ${totalPhotos} gallery photos across ${chunkCount} chunks to Firestore.`);
+}
+
+// Assemble chunked Firestore documents transparently on client read
+async function assembleFirestoreDoc(storeName, docData) {
+  if (storeName === "cms_content" && docData && (docData.content_key === "gallery_images" || docData.is_chunked)) {
+    if (docData.is_chunked && typeof firebase !== "undefined" && firebase.firestore) {
+      try {
+        const firestore = firebase.firestore();
+        const chunksSnapshot = await firestore.collection("cms_gallery_chunks").get();
+        if (!chunksSnapshot.empty) {
+          const chunks = [];
+          chunksSnapshot.forEach(doc => chunks.push(doc.data()));
+          chunks.sort((a, b) => (a.chunk_index || 0) - (b.chunk_index || 0));
+          const allPhotos = [];
+          chunks.forEach(c => {
+            if (Array.isArray(c.photos)) {
+              allPhotos.push(...c.photos);
+            } else if (typeof c.photos_json === "string") {
+              try {
+                const parsed = JSON.parse(c.photos_json);
+                if (Array.isArray(parsed)) allPhotos.push(...parsed);
+              } catch (e) {}
+            }
+          });
+          return {
+            content_key: "gallery_images",
+            value: JSON.stringify(allPhotos),
+            updated_at: docData.updated_at || new Date().toISOString(),
+            synced: true
+          };
+        }
+      } catch (e) {
+        console.warn("assembleFirestoreDoc failed, keeping local fallback:", e);
+      }
+    }
+  }
+  return docData;
 }
 
 // Database Helper Actions
@@ -270,6 +431,7 @@ const db = {
     if (storeName === "broadcast_archives") return obj.archive_id;
     if (storeName === "custom_recipient_groups") return obj.group_id;
     if (storeName === "subjects") return obj.subject_id;
+    if (storeName === "birthday_dispatches") return obj.dispatch_id;
     return null;
   },
 
@@ -396,7 +558,14 @@ const db = {
       try {
         const docId = this.getDocId(storeName, obj);
         if (docId) {
-          await firebase.firestore().collection(storeName).doc(docId).set(obj);
+          if (typeof ensureFirebaseAuth === "function") {
+            await ensureFirebaseAuth();
+          }
+          if (storeName === "cms_content" && docId === "gallery_images" && typeof syncGalleryImagesToFirestore === "function") {
+            await syncGalleryImagesToFirestore(obj);
+          } else {
+            await firebase.firestore().collection(storeName).doc(docId).set(obj);
+          }
         }
       } catch (err) {
         console.warn("Firestore save failed (offline queue active):", err);
@@ -485,11 +654,170 @@ const db = {
         request.onerror = () => reject(request.error);
       });
     });
+  },
+
+  // Purge legacy sample/demo CMS announcements and SVG galleries from local IndexedDB
+  async purgeLegacySampleCMSData() {
+    try {
+      // 1. Purge legacy sample albums
+      const albumsRec = await this.get("cms_content", "gallery_albums");
+      const REAL_ALBUMS = [
+        { id: "alb-ghana", name: "Ghana Day Celebration" },
+        { id: "alb-grad", name: "Graduation Ceremony" },
+        { id: "alb-church", name: "Church Service" },
+        { id: "alb-career", name: "Career Day" },
+        { id: "alb-lab", name: "Lab Session" }
+      ];
+      if (albumsRec && albumsRec.value) {
+        const valStr = typeof albumsRec.value === "string" ? albumsRec.value : JSON.stringify(albumsRec.value);
+        if (valStr.includes("alb-academics") || valStr.includes("Digital Coding Lab") || valStr.includes("alb-sports") || valStr.includes("alb-culture")) {
+          console.log("Purging legacy sample albums from IndexedDB...");
+          await this.putLocal("cms_content", {
+            content_key: "gallery_albums",
+            value: JSON.stringify(REAL_ALBUMS),
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
+
+      // 2. Purge legacy sample announcements
+      const newsRec = await this.get("cms_content", "news_feed");
+      if (newsRec && newsRec.value) {
+        const valStr = typeof newsRec.value === "string" ? newsRec.value : JSON.stringify(newsRec.value);
+        if (
+          valStr.includes("news-1") ||
+          valStr.includes("New E-Library Portal Launched") ||
+          valStr.includes("Upcoming PTA General Meeting") ||
+          valStr.includes("Inter-Houses Athletics Competition")
+        ) {
+          console.log("Purging legacy sample announcements from IndexedDB and Cloud Firestore...");
+          let cleanNews = [];
+          try {
+            const parsed = JSON.parse(newsRec.value);
+            if (Array.isArray(parsed)) {
+              cleanNews = parsed.filter(item =>
+                item.id !== "news-1" &&
+                item.id !== "news-2" &&
+                item.id !== "news-3" &&
+                item.title !== "New E-Library Portal Launched" &&
+                item.title !== "Upcoming PTA General Meeting" &&
+                item.title !== "Inter-Houses Athletics Competition"
+              );
+            }
+          } catch (e) {}
+          await this.put("cms_content", {
+            content_key: "news_feed",
+            value: JSON.stringify(cleanNews),
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
+
+      // 2.5 Purge legacy sample calendar events (2025/2026 First Academic Term, etc)
+      const calRec = await this.get("academic_calendar", "main-calendar");
+      if (calRec && Array.isArray(calRec.events) && calRec.events.length > 0) {
+        const hasLegacyCal = calRec.events.some(e =>
+          e.id === "ev-term1" ||
+          e.id === "ev-term2" ||
+          e.id === "ev-term3" ||
+          e.id === "ev-pta" ||
+          e.id === "ev-midterm" ||
+          e.id === "ev-exam" ||
+          (e.name && e.name.includes("2025/2026"))
+        );
+        if (hasLegacyCal) {
+          console.log("Purging legacy sample calendar events from IndexedDB and Cloud Firestore...");
+          calRec.events = calRec.events.filter(e =>
+            e.id !== "ev-term1" &&
+            e.id !== "ev-term2" &&
+            e.id !== "ev-term3" &&
+            e.id !== "ev-pta" &&
+            e.id !== "ev-midterm" &&
+            e.id !== "ev-exam" &&
+            !(e.name && e.name.includes("2025/2026"))
+          );
+          calRec.updated_at = new Date().toISOString();
+          await this.put("academic_calendar", calRec);
+        }
+      }
+
+      // 3. Purge legacy sample gallery images & ensure real 50 photos are loaded
+      const galleryRec = await this.get("cms_content", "gallery_images");
+      let needsPhotoFallback = false;
+      if (galleryRec && galleryRec.value) {
+        const valStr = typeof galleryRec.value === "string" ? galleryRec.value : JSON.stringify(galleryRec.value);
+        if (
+          valStr.includes("img_demo_") ||
+          valStr.includes("data:image/svg+xml") ||
+          valStr.includes("Digital Coding Lab") ||
+          valStr.includes("Science Experiments Lab") ||
+          valStr.includes("Sports Grounds")
+        ) {
+          console.log("Purging legacy mock gallery images from IndexedDB...");
+          needsPhotoFallback = true;
+        } else {
+          try {
+            const arr = JSON.parse(galleryRec.value);
+            if (!Array.isArray(arr) || arr.length === 0) {
+              needsPhotoFallback = true;
+            }
+          } catch (e) {
+            needsPhotoFallback = true;
+          }
+        }
+      } else {
+        needsPhotoFallback = true;
+      }
+
+      if (needsPhotoFallback) {
+        try {
+          const candidatePaths = [
+            "./assets/gallery-data.json",
+            "../portal/assets/gallery-data.json",
+            "../website/assets/gallery-data.json",
+            "/portal/assets/gallery-data.json",
+            "/website/assets/gallery-data.json"
+          ];
+          let fetchedPhotos = null;
+          for (const p of candidatePaths) {
+            try {
+              const resp = await fetch(p);
+              if (resp && resp.ok) {
+                const data = await resp.json();
+                if (Array.isArray(data) && data.length > 0) {
+                  fetchedPhotos = data;
+                  break;
+                }
+              }
+            } catch (fetchErr) {}
+          }
+          if (fetchedPhotos && fetchedPhotos.length > 0) {
+            const photoDoc = {
+              content_key: "gallery_images",
+              value: JSON.stringify(fetchedPhotos),
+              updated_at: new Date().toISOString()
+            };
+            await this.putLocal("cms_content", photoDoc);
+            console.log(`IndexedDB seeded with ${fetchedPhotos.length} real photos from manifest.`);
+            if (typeof syncGalleryImagesToFirestore === "function" && navigator.onLine && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+              syncGalleryImagesToFirestore(photoDoc).catch(e => console.warn("Background photo sync notice:", e));
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to load real gallery photos fallback:", err);
+        }
+      }
+    } catch (e) {
+      console.warn("purgeLegacySampleCMSData error:", e);
+    }
   }
 };
 
 // Seed Mock Data
 async function seedMockData() {
+  if (typeof db.purgeLegacySampleCMSData === "function") {
+    await db.purgeLegacySampleCMSData();
+  }
   // Check and seed upgraded tables first (handles DB version 2 migrations)
   try {
     // Auto-migrate any legacy PENDING_PASSWORD users to ACTIVE and ensure gender exists
@@ -1050,40 +1378,11 @@ async function seedMockData() {
     },
     {
       content_key: "news_feed",
-      value: JSON.stringify([
-        {
-          id: "news-1",
-          title: "New E-Library & Persistent PDF Reader Launched",
-          date: "2026-08-01",
-          summary: "Students can now download open-access textbooks offline directly inside their dashboard, with auto-save reading history."
-        },
-        {
-          id: "news-2",
-          title: "Upcoming PTA General Term Meeting",
-          date: "2026-08-15",
-          summary: "All parents are invited to the Term 3 general review meeting. Digital report cards and pickup registration will be discussed."
-        }
-      ])
+      value: JSON.stringify([])
     },
     {
       content_key: "gallery_images",
-      value: JSON.stringify([
-        {
-          album: "Academics",
-          title: "Digital Coding Lab",
-          url: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 60' fill='%231e3a8a'><rect width='100' height='60'/><text x='15' y='35' fill='white' font-family='sans-serif' font-size='8'>Computer Science Lab</text></svg>"
-        },
-        {
-          album: "Academics",
-          title: "Science Experiments Lab",
-          url: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 60' fill='%23065f46'><rect width='100' height='60'/><text x='20' y='35' fill='white' font-family='sans-serif' font-size='8'>Practical Chemistry</text></svg>"
-        },
-        {
-          album: "Sports",
-          title: "Sports Grounds",
-          url: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 60' fill='%23854d0e'><rect width='100' height='60'/><text x='30' y='35' fill='white' font-family='sans-serif' font-size='8'>Soccer Field</text></svg>"
-        }
-      ])
+      value: JSON.stringify([])
     },
     {
       content_key: "leadership_team",
@@ -1096,9 +1395,11 @@ async function seedMockData() {
     {
       content_key: "gallery_albums",
       value: JSON.stringify([
-        { id: "alb-general", name: "General" },
-        { id: "alb-academics", name: "Academics" },
-        { id: "alb-sports", name: "Sports" }
+        { id: "alb-ghana", name: "Ghana Day Celebration" },
+        { id: "alb-grad", name: "Graduation Ceremony" },
+        { id: "alb-church", name: "Church Service" },
+        { id: "alb-career", name: "Career Day" },
+        { id: "alb-lab", name: "Lab Session" }
       ])
     }
   ];
@@ -1106,7 +1407,11 @@ async function seedMockData() {
   for (const c of seedCMS) {
     const existing = await db.get("cms_content", c.content_key);
     if (!existing) {
-      await db.put("cms_content", c);
+      await db.putLocal("cms_content", {
+        ...c,
+        updated_at: "1970-01-01T00:00:00.000Z",
+        created_at: "1970-01-01T00:00:00.000Z"
+      });
     }
   }
 
@@ -1163,7 +1468,8 @@ const STORES_TO_SYNC = [
   "portal_messages",
   "broadcast_archives",
   "custom_recipient_groups",
-  "subjects"
+  "subjects",
+  "birthday_dispatches"
 ];
 
 // Universal timestamp extractor supporting ISO strings, numeric timestamps, and Firestore Timestamps
@@ -1192,6 +1498,36 @@ function getDocTimestamp(doc) {
 function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
   if (!localDoc) return false;
   if (!remoteDoc) return true;
+
+  // Never keep legacy sample demo announcements, SVG mock galleries, or mock albums over real cloud data
+  if (storeName === "cms_content") {
+    try {
+      const valStr = typeof localDoc.value === "string" ? localDoc.value : JSON.stringify(localDoc.value || "");
+      if (
+        valStr.includes("img_demo_") ||
+        valStr.includes("Digital Coding Lab") ||
+        valStr.includes("Science Experiments Lab") ||
+        valStr.includes("Sports Grounds") ||
+        valStr.includes("news-1") ||
+        valStr.includes("New E-Library Portal Launched") ||
+        valStr.includes("Upcoming PTA General Meeting") ||
+        valStr.includes("Inter-Houses Athletics Competition") ||
+        valStr.includes("alb-academics")
+      ) {
+        return false;
+      }
+    } catch (e) {}
+  } else if (storeName === "academic_calendar" && docId === "main-calendar") {
+    try {
+      if (Array.isArray(localDoc.events)) {
+        const hasLegacy = localDoc.events.some(e =>
+          e.id === "ev-term1" ||
+          (e.name && e.name.includes("2025/2026"))
+        );
+        if (hasLegacy) return false;
+      }
+    } catch (e) {}
+  }
 
   // 1. Pending offline local changes must never be overwritten
   if (localDoc.synced === false) {
@@ -1253,7 +1589,41 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
   return localTime > 0;
 }
 
-function startFirestoreSync() {
+// Sanitize incoming Firestore documents to scrub legacy sample announcements and events
+function sanitizeIncomingDoc(storeName, docId, docData) {
+  if (!docData) return docData;
+  if (storeName === "cms_content" && docId === "news_feed" && docData.value) {
+    try {
+      let news = typeof docData.value === "string" ? JSON.parse(docData.value) : docData.value;
+      if (Array.isArray(news)) {
+        const filtered = news.filter(item =>
+          item.id !== "news-1" &&
+          item.id !== "news-2" &&
+          item.id !== "news-3" &&
+          item.title !== "New E-Library Portal Launched" &&
+          item.title !== "Upcoming PTA General Meeting" &&
+          item.title !== "Inter-Houses Athletics Competition"
+        );
+        if (filtered.length !== news.length) {
+          docData.value = JSON.stringify(filtered);
+        }
+      }
+    } catch (e) {}
+  } else if (storeName === "academic_calendar" && docId === "main-calendar" && Array.isArray(docData.events)) {
+    docData.events = docData.events.filter(e =>
+      e.id !== "ev-term1" &&
+      e.id !== "ev-term2" &&
+      e.id !== "ev-term3" &&
+      e.id !== "ev-pta" &&
+      e.id !== "ev-midterm" &&
+      e.id !== "ev-exam" &&
+      !(e.name && e.name.includes("2025/2026"))
+    );
+  }
+  return docData;
+}
+
+async function startFirestoreSync() {
   if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) {
     console.log("Firebase not configured - running in local-only Mode.");
     return;
@@ -1264,15 +1634,7 @@ function startFirestoreSync() {
     if (firebase.apps.length === 0) {
       firebase.initializeApp(window.firebaseConfig);
     }
-    if (firebase.auth && typeof firebase.auth === "function") {
-      try {
-        firebase.auth().signInAnonymously().catch(authErr => {
-          console.warn("Firebase anonymous authentication:", authErr.message || authErr);
-        });
-      } catch (authInitErr) {
-        console.warn("Auth init skipped:", authInitErr);
-      }
-    }
+    await ensureFirebaseAuth();
     const firestore = firebase.firestore();
 
     STORES_TO_SYNC.forEach(storeName => {
@@ -1285,17 +1647,23 @@ function startFirestoreSync() {
           snapshot.forEach(doc => {
             const docData = doc.data();
             promises.push((async () => {
-              const docId = db.getDocId(storeName, docData) || doc.id;
+              let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
+              const docId = db.getDocId(storeName, resolvedDocData) || doc.id;
+              resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
               if (docId) {
                 const localDoc = await db.get(storeName, docId);
-                if (shouldKeepLocalDoc(storeName, docId, localDoc, docData)) {
+                if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
                   // Local record is newer or protected: keep local data and heal cloud if online
                   const localTime = getDocTimestamp(localDoc);
-                  const remoteTime = getDocTimestamp(docData);
+                  const remoteTime = getDocTimestamp(resolvedDocData);
                   if (localTime > remoteTime || localDoc.synced === false) {
                     try {
                       if (navigator.onLine) {
-                        await firestore.collection(storeName).doc(docId).set(localDoc);
+                        if (storeName === "cms_content" && docId === "gallery_images") {
+                          await syncGalleryImagesToFirestore(localDoc);
+                        } else {
+                          await firestore.collection(storeName).doc(docId).set(localDoc);
+                        }
                         localDoc.synced = true;
                         await db.putLocal(storeName, localDoc);
                       }
@@ -1306,8 +1674,8 @@ function startFirestoreSync() {
                   return;
                 }
               }
-              await db.putLocal(storeName, docData);
-              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });
+              await db.putLocal(storeName, resolvedDocData);
+              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
               window.dispatchEvent(event);
             })());
           });
@@ -1330,13 +1698,17 @@ function startFirestoreSync() {
           try {
             const localRecords = await db.getAll(storeName);
             if (localRecords && localRecords.length > 0) {
-              localRecords.forEach(rec => {
+              for (const rec of localRecords) {
                 const docId = db.getDocId(storeName, rec);
                 if (docId) {
                   if (!rec.updated_at) rec.updated_at = new Date().toISOString();
-                  firestore.collection(storeName).doc(docId).set(rec).catch(e => console.warn(`Initial seed push for ${storeName} skipped:`, e));
+                  if (storeName === "cms_content" && docId === "gallery_images") {
+                    await syncGalleryImagesToFirestore(rec);
+                  } else {
+                    await firestore.collection(storeName).doc(docId).set(rec);
+                  }
                 }
-              });
+              }
             }
           } catch (seedPushErr) {
             console.warn(`Auto-populating cloud collection ${storeName} skipped:`, seedPushErr);
@@ -1354,18 +1726,23 @@ function startFirestoreSync() {
       firestore.collection(storeName).onSnapshot(snapshot => {
         snapshot.docChanges().forEach(async (change) => {
           const docData = change.doc.data();
-          const docId = change.doc.id || db.getDocId(storeName, docData);
-          
           if (change.type === "added" || change.type === "modified") {
+            let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
+            const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
+            resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
             const localDoc = await db.get(storeName, docId);
-            if (shouldKeepLocalDoc(storeName, docId, localDoc, docData)) {
+            if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
               // Local is newer or protected; heal cloud if local is strictly newer or pending
               const localTime = getDocTimestamp(localDoc);
-              const remoteTime = getDocTimestamp(docData);
+              const remoteTime = getDocTimestamp(resolvedDocData);
               if (localTime > remoteTime || localDoc.synced === false) {
                 try {
                   if (navigator.onLine) {
-                    await firestore.collection(storeName).doc(docId).set(localDoc);
+                    if (storeName === "cms_content" && docId === "gallery_images") {
+                      await syncGalleryImagesToFirestore(localDoc);
+                    } else {
+                      await firestore.collection(storeName).doc(docId).set(localDoc);
+                    }
                     localDoc.synced = true;
                     await db.putLocal(storeName, localDoc);
                   }
@@ -1373,10 +1750,11 @@ function startFirestoreSync() {
               }
               return;
             }
-            await db.putLocal(storeName, docData);
-            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData } });
+            await db.putLocal(storeName, resolvedDocData);
+            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
             window.dispatchEvent(event);
           } else if (change.type === "removed") {
+            const docId = change.doc.id;
             await db.deleteLocal(storeName, docId);
             const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
             window.dispatchEvent(event);
@@ -1387,6 +1765,23 @@ function startFirestoreSync() {
         console.warn(`Firestore snapshot sync for ${storeName}:`, err);
       });
     });
+
+    // Real-time listener for gallery chunk updates across clients
+    try {
+      firestore.collection("cms_gallery_chunks").onSnapshot(async (snapshot) => {
+        if (!snapshot.empty) {
+          const galleryMeta = await db.get("cms_content", "gallery_images");
+          const assembled = await assembleFirestoreDoc("cms_content", galleryMeta || { content_key: "gallery_images", is_chunked: true });
+          if (assembled && assembled.value) {
+            await db.putLocal("cms_content", assembled);
+            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName: "cms_content", docData: assembled } });
+            window.dispatchEvent(event);
+          }
+        }
+      }, err => {
+        console.warn("Gallery chunks snapshot sync notice:", err);
+      });
+    } catch (e) {}
   } catch (err) {
     console.error("Failed to initialize Firebase database sync:", err);
   }

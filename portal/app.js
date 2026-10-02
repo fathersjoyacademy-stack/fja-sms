@@ -418,16 +418,41 @@ async function renderLandingCMS() {
       const container = document.getElementById("cms-values-container");
       container.innerHTML = values.map(val => `
         <div class="value-card">
-          <h4 style="color:var(--accent-primary); margin-bottom:0.5rem;">${val.title}</h4>
+          <h4 style="color:var(--accent-primary); margin-bottom:0.5rem; text-align:center;">${val.title}</h4>
           <p style="font-size:0.9rem; color:var(--text-secondary);">${val.desc}</p>
         </div>
       `).join("");
     }
 
-    const galleryKey = await window.db.get("cms_content", "gallery_images");
-    if (galleryKey) {
-      const gallery = JSON.parse(galleryKey.value);
-      
+    let galleryKey = await window.db.get("cms_content", "gallery_images");
+    let gallery = (galleryKey && galleryKey.value) ? JSON.parse(galleryKey.value) : null;
+
+    const isMockGallery = gallery && Array.isArray(gallery) && gallery.some(item =>
+      (item.id && item.id.startsWith("img_demo_")) ||
+      (item.url && item.url.startsWith("data:image/svg+xml")) ||
+      (item.album && (item.album === "Digital Coding Lab" || item.album === "Science Experiments Lab" || item.album === "Sports Grounds"))
+    );
+
+    if (!gallery || !Array.isArray(gallery) || gallery.length === 0 || isMockGallery) {
+      try {
+        const resp = await fetch("./assets/gallery-data.json");
+        if (resp && resp.ok) {
+          const fetched = await resp.json();
+          if (Array.isArray(fetched) && fetched.length > 0) {
+            gallery = fetched;
+            if (window.db && typeof window.db.putLocal === "function") {
+              await window.db.putLocal("cms_content", {
+                content_key: "gallery_images",
+                value: JSON.stringify(gallery),
+                updated_at: new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (gallery && Array.isArray(gallery) && gallery.length > 0) {
       // Group by album name
       const albums = {};
       gallery.forEach(item => {
@@ -440,42 +465,76 @@ async function renderLandingCMS() {
 
       const container = document.getElementById("cms-gallery-container");
       if (container) {
-        // Show first photo of each album
-        container.innerHTML = Object.keys(albums).map(albumName => {
-          const albumPhotos = albums[albumName];
-          const firstPhoto = albumPhotos[0];
-          return `
-            <div class="gallery-item btn-open-album" data-album="${albumName}" style="cursor:pointer; position:relative;">
-              <img src="${firstPhoto.url}" alt="${firstPhoto.title}">
-              <div class="gallery-caption" style="text-align:center;">${albumName} (${albumPhotos.length} photos)</div>
+        const albumKeys = Object.keys(albums).filter(name => albums[name] && albums[name].length > 0);
+        if (albumKeys.length === 0) {
+          container.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); font-size: 0.95rem;">
+              Campus photo galleries will be available soon. Check back shortly!
             </div>
           `;
-        }).join("");
-
-        // Add click listener to open the carousel modal
-        container.querySelectorAll(".btn-open-album").forEach(el => {
-          el.addEventListener("click", () => {
-            const albumName = el.getAttribute("data-album");
+        } else {
+          container.innerHTML = albumKeys.map(albumName => {
             const albumPhotos = albums[albumName];
-            if (albumPhotos && typeof openGalleryCarousel === "function") {
-              openGalleryCarousel(albumName, albumPhotos);
-            }
+            const firstPhoto = albumPhotos[0];
+            return `
+              <div class="gallery-item btn-open-album" data-album="${albumName}" style="cursor:pointer; position:relative;">
+                <img src="${firstPhoto.url}" alt="${firstPhoto.title}">
+                <div class="gallery-caption" style="text-align:center;">${albumName} (${albumPhotos.length} photos)</div>
+              </div>
+            `;
+          }).join("");
+
+          container.querySelectorAll(".btn-open-album").forEach(el => {
+            el.addEventListener("click", () => {
+              const albumName = el.getAttribute("data-album");
+              const albumPhotos = albums[albumName];
+              if (albumPhotos && typeof openGalleryCarousel === "function") {
+                openGalleryCarousel(albumName, albumPhotos);
+              }
+            });
           });
-        });
+        }
+      }
+    } else {
+      const container = document.getElementById("cms-gallery-container");
+      if (container) {
+        container.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem 1rem; color: var(--text-muted); font-size: 0.95rem;">
+            Campus photo galleries will be available soon. Check back shortly!
+          </div>
+        `;
       }
     }
 
     const newsKey = await window.db.get("cms_content", "news_feed");
-    if (newsKey) {
-      const news = JSON.parse(newsKey.value);
-      const container = document.getElementById("cms-news-container");
-      container.innerHTML = news.map(item => `
-        <div class="news-card">
-          <span class="news-meta">Published: ${item.date}</span>
-          <h3 style="margin-bottom:0.5rem; font-family:var(--font-family-display);">${item.title}</h3>
-          <p style="color:var(--text-secondary); font-size:0.95rem;">${item.summary}</p>
-        </div>
-      `).join("");
+    const containerNews = document.getElementById("cms-news-container");
+    if (containerNews) {
+      let news = (newsKey && newsKey.value) ? JSON.parse(newsKey.value) : [];
+      if (Array.isArray(news)) {
+        news = news.filter(item =>
+          item.id !== "news-1" &&
+          item.id !== "news-2" &&
+          item.id !== "news-3" &&
+          item.title !== "New E-Library Portal Launched" &&
+          item.title !== "Upcoming PTA General Meeting" &&
+          item.title !== "Inter-Houses Athletics Competition"
+        );
+      }
+      if (!Array.isArray(news) || news.length === 0) {
+        containerNews.innerHTML = `
+          <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted); font-size:0.95rem;">
+            No announcements published at this time. Please check back shortly.
+          </div>
+        `;
+      } else {
+        containerNews.innerHTML = news.map(item => `
+          <div class="news-card">
+            <span class="news-meta" style="text-align:center; display:block;">Published: ${item.date}</span>
+            <h3 style="margin-bottom:0.5rem; font-family:var(--font-family-display); text-align:center;">${item.title}</h3>
+            <p style="color:var(--text-secondary); font-size:0.95rem;">${item.summary}</p>
+          </div>
+        `).join("");
+      }
     }
 
     const leadershipKey = await window.db.get("cms_content", "leadership_team");
@@ -487,7 +546,7 @@ async function renderLandingCMS() {
           <div style="width:70px; height:70px; border-radius:50%; background:var(--accent-secondary); margin:0 auto 1rem; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:1.5rem;">
             ${member.name.split(" ").map(n => n[0]).join("")}
           </div>
-          <h4 style="margin-bottom:0.25rem;">${member.name}</h4>
+          <h4 style="margin-bottom:0.25rem; text-align:center;">${member.name}</h4>
           <span style="color:var(--accent-primary); font-size:0.85rem; font-weight:600;">${member.role}</span>
         </div>
       `).join("");
@@ -2591,7 +2650,7 @@ async function renderAccountProvisioning(container) {
                   <th>Full Name</th>
                   <th>Gender</th>
                   <th>Class / Grade</th>
-                  <th>Emergency Contact</th>
+                  <th>Primary Contact</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -2781,7 +2840,7 @@ async function renderAccountProvisioning(container) {
     });
 
     const allStudents = filtered.filter(u => u.role === "Student");
-    const allStaff = filtered.filter(u => u.role !== "Student");
+    const allStaff = filtered.filter(u => u.role !== "Student" && u.role !== "Parent" && u.role !== "Guardian");
 
     const pagedStudents = paginateArray(allStudents, studentPage, studentPageSize);
     const pagedStaff = paginateArray(allStaff, staffPage, staffPageSize);
@@ -2795,16 +2854,21 @@ async function renderAccountProvisioning(container) {
         const cl = enrolment ? classes.find(c => c.class_id === enrolment.class_id) : null;
         const className = cl ? cl.class_name : "Not Assigned";
         
-        let emergName = "None";
-        if (s.emergency_contact && s.emergency_contact.primary) {
-          emergName = `${s.emergency_contact.primary.first_name} (${s.emergency_contact.primary.relation})`;
-        } else {
-          // Look up profile for student emergency contact
-          const prof = profiles.find(p => p.user_id === s.user_id);
-          if (prof && prof.emergency_contact && prof.emergency_contact.primary) {
-            emergName = `${prof.emergency_contact.primary.first_name} (${prof.emergency_contact.primary.relation})`;
+        // Resolve primary contact number of the user
+        const prof = profiles.find(p => p.user_id === s.user_id) || {};
+        let primaryContactNum = s.phone || "";
+        if (!primaryContactNum && prof) {
+          if (prof.emergency_contact) {
+            try {
+              const em = typeof prof.emergency_contact === "string" ? JSON.parse(prof.emergency_contact) : prof.emergency_contact;
+              primaryContactNum = em.phone || (em.primary && em.primary.phone) || "";
+            } catch (e) {}
+          }
+          if (!primaryContactNum) {
+            primaryContactNum = prof.father_phone || prof.mother_phone || "";
           }
         }
+        const contactDisplay = primaryContactNum || "No Contact";
 
         return `
           <tr>
@@ -2812,7 +2876,7 @@ async function renderAccountProvisioning(container) {
             <td>${s.first_name} ${s.last_name}</td>
             <td>${s.gender || 'Male'}</td>
             <td><span class="badge badge-info">${className}</span></td>
-            <td>${emergName}</td>
+            <td>${contactDisplay}</td>
             <td><span class="badge ${s.status === 'ACTIVE' ? 'badge-success' : s.status === 'PENDING_PASSWORD' ? 'badge-warning' : 'badge-danger'}">${s.status}</span></td>
             <td>
               <button class="btn btn-secondary btn-reset-user" data-id="${s.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Reset Pass</button>
@@ -2973,6 +3037,13 @@ async function renderAccountProvisioning(container) {
   // Student Form Submission
   document.getElementById("form-create-student").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.dataset.origText = submitBtn.innerHTML;
+      submitBtn.innerHTML = "Creating Student Account...";
+    }
+
     const first = document.getElementById("stud-first-name").value.trim();
     const other = document.getElementById("stud-other-name").value.trim();
     const last = document.getElementById("stud-last-name").value.trim();
@@ -3055,6 +3126,32 @@ async function renderAccountProvisioning(container) {
     };
     
     try {
+      // Check existing accounts for identical first, other, last names and primary contact phone
+      // Parents and emergency contacts for staff are ignored as they can be shared across multiple users
+      const allUsers = await window.db.getAll("users") || [];
+      const normPhone = window.api ? window.api.normalizeGhanaPhone(phone) : phone.replace(/\D/g, "");
+      const cleanFirst = first.toLowerCase();
+      const cleanOther = other.toLowerCase();
+      const cleanLast = last.toLowerCase();
+
+      const dup = allUsers.find(u => {
+        if (!u || u.status === "ARCHIVED") return false;
+        if (u.role === "Parent") return false;
+        const uFirst = (u.first_name || "").trim().toLowerCase();
+        const uOther = (u.other_name || "").trim().toLowerCase();
+        const uLast = (u.last_name || "").trim().toLowerCase();
+        const uNormPhone = window.api ? window.api.normalizeGhanaPhone(u.phone) : (u.phone || "").replace(/\D/g, "");
+        const nameMatch = uFirst === cleanFirst && uOther === cleanOther && uLast === cleanLast;
+        const phoneMatch = Boolean(normPhone && uNormPhone && normPhone === uNormPhone);
+        return nameMatch && phoneMatch;
+      });
+
+      if (dup) {
+        alert(`Account already exists: A user record (${dup.uid} - ${dup.role}) already exists with the name "${first} ${other ? other + ' ' : ''}${last}" and contact number "${phone}".`);
+        showToast("Account already exists with this name and contact number.", "danger");
+        return;
+      }
+
       const photo_url = document.getElementById("stud-photo-base64").value || "";
       const userPayload = { first_name: first, other_name: other, last_name: last, gender, phone, email, role: "Student", date_of_birth: dob };
       const profilePayload = {
@@ -3092,27 +3189,39 @@ async function renderAccountProvisioning(container) {
       loadUsers();
     } catch (err) {
       showToast(err.message || "Failed to create student account", "danger");
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.origText || "Create Student Account";
+      }
     }
   });
 
   // Staff Form Submission
   document.getElementById("form-create-staff").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const first = document.getElementById("staff-first-name").value;
-    const other = document.getElementById("staff-other-name").value;
-    const last = document.getElementById("staff-last-name").value;
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.dataset.origText = submitBtn.innerHTML;
+      submitBtn.innerHTML = "Creating Staff Account...";
+    }
+
+    const first = document.getElementById("staff-first-name").value.trim();
+    const other = document.getElementById("staff-other-name").value.trim();
+    const last = document.getElementById("staff-last-name").value.trim();
     const gender = document.getElementById("staff-gender") ? document.getElementById("staff-gender").value : "Male";
-    const phone = document.getElementById("staff-phone").value;
-    const email = document.getElementById("staff-email").value;
+    const phone = document.getElementById("staff-phone").value.trim();
+    const email = document.getElementById("staff-email").value.trim();
     const role = document.getElementById("staff-role").value;
     const dob = document.getElementById("staff-dob").value;
     const salary = document.getElementById("staff-salary").value;
     const allowance = document.getElementById("staff-allowance").value;
-    const address = document.getElementById("staff-address").value;
+    const address = document.getElementById("staff-address").value.trim();
     
-    // Emergency contact
-    const emergName = document.getElementById("staff-emerg-name").value;
-    const emergPhone = document.getElementById("staff-emerg-phone").value;
+    // Emergency contact (ignored for duplicate checks as per requirement)
+    const emergName = document.getElementById("staff-emerg-name").value.trim();
+    const emergPhone = document.getElementById("staff-emerg-phone").value.trim();
     const emergRelation = document.getElementById("staff-emerg-relation").value;
     
     const emergency_contact = { name: emergName, phone: emergPhone, relation: emergRelation };
@@ -3125,6 +3234,32 @@ async function renderAccountProvisioning(container) {
     }
 
     try {
+      // Duplicate check: name (first, other, last) + primary phone
+      // Parents and emergency contacts for staff are ignored as they can be shared across multiple users
+      const allUsers = await window.db.getAll("users") || [];
+      const normPhone = window.api ? window.api.normalizeGhanaPhone(phone) : phone.replace(/\D/g, "");
+      const cleanFirst = first.toLowerCase();
+      const cleanOther = other.toLowerCase();
+      const cleanLast = last.toLowerCase();
+
+      const dup = allUsers.find(u => {
+        if (!u || u.status === "ARCHIVED") return false;
+        if (u.role === "Parent") return false;
+        const uFirst = (u.first_name || "").trim().toLowerCase();
+        const uOther = (u.other_name || "").trim().toLowerCase();
+        const uLast = (u.last_name || "").trim().toLowerCase();
+        const uNormPhone = window.api ? window.api.normalizeGhanaPhone(u.phone) : (u.phone || "").replace(/\D/g, "");
+        const nameMatch = uFirst === cleanFirst && uOther === cleanOther && uLast === cleanLast;
+        const phoneMatch = Boolean(normPhone && uNormPhone && normPhone === uNormPhone);
+        return nameMatch && phoneMatch;
+      });
+
+      if (dup) {
+        alert(`Account already exists: A user record (${dup.uid} - ${dup.role}) already exists with the name "${first} ${other ? other + ' ' : ''}${last}" and contact number "${phone}".`);
+        showToast("Account already exists with this name and contact number.", "danger");
+        return;
+      }
+
       const photo_url = document.getElementById("staff-photo-base64").value || "";
       const userPayload = { first_name: first, other_name: other, last_name: last, gender, phone, email, role: roleToSave, date_of_birth: dob };
       const profilePayload = { address, base_salary: salary, allowances: allowance, emergency_contact, section, photo_url };
@@ -3162,15 +3297,27 @@ async function renderAccountProvisioning(container) {
       loadUsers();
     } catch (err) {
       showToast(err.message || "Failed to create staff account", "danger");
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.origText || "Create Staff Account";
+      }
     }
   });
 
   document.getElementById("btn-upload-csv").addEventListener("click", async () => {
+    const csvBtn = document.getElementById("btn-upload-csv");
     const fileInput = document.getElementById("prov-csv-file");
     const file = fileInput.files[0];
     if (!file) {
       showToast("Please select a valid CSV file first.", "warning");
       return;
+    }
+
+    if (csvBtn) {
+      csvBtn.disabled = true;
+      csvBtn.dataset.origText = csvBtn.innerHTML;
+      csvBtn.innerHTML = "Processing Bulk CSV...";
     }
 
     const reader = new FileReader();
@@ -3317,7 +3464,18 @@ async function renderAccountProvisioning(container) {
 
       showToast(`Processed bulk CSV. Imported: ${importCount}, Errors/Duplicates: ${errorCount}`, importCount > 0 ? "success" : "danger");
       fileInput.value = "";
+      if (csvBtn) {
+        csvBtn.disabled = false;
+        csvBtn.innerHTML = csvBtn.dataset.origText || "Process Bulk CSV Provisioning";
+      }
       loadUsers();
+    };
+    reader.onerror = () => {
+      showToast("Error reading CSV file.", "danger");
+      if (csvBtn) {
+        csvBtn.disabled = false;
+        csvBtn.innerHTML = csvBtn.dataset.origText || "Process Bulk CSV Provisioning";
+      }
     };
     reader.readAsText(file);
   });
@@ -3768,20 +3926,33 @@ async function renderWebsiteCMS(container) {
           showToast("Please enter an album name.", "warning");
           return;
         }
-        const stored = await getStoredAlbums();
-        if (stored.some(a => a.name.toLowerCase() === rawName.toLowerCase())) {
-          showToast(`Album "${rawName}" already exists.`, "info");
-          if (albumSelect) albumSelect.value = rawName;
-          if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+
+        btnSaveNewAlbumOnly.disabled = true;
+        const origText = btnSaveNewAlbumOnly.innerText;
+        btnSaveNewAlbumOnly.innerText = "Creating...";
+
+        try {
+          const stored = await getStoredAlbums();
+          if (stored.some(a => a.name.toLowerCase() === rawName.toLowerCase())) {
+            showToast(`Album "${rawName}" already exists.`, "info");
+            if (albumSelect) albumSelect.value = rawName;
+            if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+            newAlbumInput.value = "";
+            return;
+          }
+          stored.push({ id: `alb-${Date.now()}`, name: rawName, created_at: new Date().toISOString() });
+          await saveStoredAlbums(stored);
+          showToast(`Album "${rawName}" created successfully!`, "success");
           newAlbumInput.value = "";
-          return;
+          if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+          await renderCMSThumbnails(rawName);
+        } catch (err) {
+          console.error("Create album error:", err);
+          showToast("Failed to create album", "danger");
+        } finally {
+          btnSaveNewAlbumOnly.disabled = false;
+          btnSaveNewAlbumOnly.innerText = origText;
         }
-        stored.push({ id: `alb-${Date.now()}`, name: rawName, created_at: new Date().toISOString() });
-        await saveStoredAlbums(stored);
-        showToast(`Album "${rawName}" created successfully!`, "success");
-        newAlbumInput.value = "";
-        if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
-        await renderCMSThumbnails(rawName);
       });
     }
 
@@ -4027,6 +4198,7 @@ async function renderWebsiteCMS(container) {
 
     // Save Photo Edit Handler
     document.getElementById("btn-save-gallery-edit")?.addEventListener("click", async () => {
+      const saveBtn = document.getElementById("btn-save-gallery-edit");
       const idxInput = document.getElementById("edit-gallery-photo-index");
       const titleInput = document.getElementById("edit-gallery-photo-title");
       const albumInput = document.getElementById("edit-gallery-photo-album");
@@ -4036,37 +4208,54 @@ async function renderWebsiteCMS(container) {
       const updatedTitle = sanitizeXSS(titleInput.value.trim() || "Photo");
       const updatedAlbum = sanitizeXSS(albumInput.value.trim() || "General");
 
-      const galleryKey = await window.db.get("cms_content", "gallery_images");
-      const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
-
-      if (!gallery[idx]) {
-        showToast("Photo record not found.", "danger");
-        return;
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.dataset.origText = saveBtn.innerText;
+        saveBtn.innerText = "Saving...";
       }
 
-      gallery[idx].title = updatedTitle;
-      gallery[idx].album = updatedAlbum;
+      try {
+        const galleryKey = await window.db.get("cms_content", "gallery_images");
+        const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
 
-      // Ensure updated album exists in storedAlbums
-      const stored = await getStoredAlbums();
-      if (!stored.some(a => a.name.toLowerCase() === updatedAlbum.toLowerCase())) {
-        stored.push({ id: `alb-${Date.now()}`, name: updatedAlbum, created_at: new Date().toISOString() });
-        await saveStoredAlbums(stored);
+        if (!gallery[idx]) {
+          showToast("Photo record not found.", "danger");
+          return;
+        }
+
+        gallery[idx].title = updatedTitle;
+        gallery[idx].album = updatedAlbum;
+
+        // Ensure updated album exists in storedAlbums
+        const stored = await getStoredAlbums();
+        if (!stored.some(a => a.name.toLowerCase() === updatedAlbum.toLowerCase())) {
+          stored.push({ id: `alb-${Date.now()}`, name: updatedAlbum, created_at: new Date().toISOString() });
+          await saveStoredAlbums(stored);
+        }
+
+        if (replaceFile && replaceFile.files && replaceFile.files[0]) {
+          showToast("Compressing replacement photo...", "info");
+          gallery[idx].url = await compressImage(replaceFile.files[0]);
+        }
+
+        await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
+        showToast("Photo details updated successfully!", "success");
+        closePhotoEdit();
+        renderCMSThumbnails(updatedAlbum);
+      } catch (err) {
+        console.error("Save gallery photo edit error:", err);
+        showToast("Failed to update photo details.", "danger");
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerText = saveBtn.dataset.origText || "Save Changes";
+        }
       }
-
-      if (replaceFile && replaceFile.files && replaceFile.files[0]) {
-        showToast("Compressing replacement photo...", "info");
-        gallery[idx].url = await compressImage(replaceFile.files[0]);
-      }
-
-      await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
-      showToast("Photo details updated successfully!", "success");
-      closePhotoEdit();
-      renderCMSThumbnails(updatedAlbum);
     });
 
     // Save Album Rename Handler
     document.getElementById("btn-save-album-rename")?.addEventListener("click", async () => {
+      const renameBtn = document.getElementById("btn-save-album-rename");
       const renameInput = document.getElementById("rename-album-input");
       const renameOld = document.getElementById("rename-album-old-name");
       const oldName = renameOld.value.trim();
@@ -4082,33 +4271,49 @@ async function renderWebsiteCMS(container) {
         return;
       }
 
-      // Update in storedAlbums
-      let stored = await getStoredAlbums();
-      let found = false;
-      stored.forEach(a => {
-        if (a.name === oldName) {
-          a.name = newName;
-          found = true;
-        }
-      });
-      if (!found) {
-        stored.push({ id: `alb-${Date.now()}`, name: newName });
+      if (renameBtn) {
+        renameBtn.disabled = true;
+        renameBtn.dataset.origText = renameBtn.innerText;
+        renameBtn.innerText = "Renaming...";
       }
-      await saveStoredAlbums(stored);
 
-      const galleryKey = await window.db.get("cms_content", "gallery_images");
-      const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
-
-      gallery.forEach(item => {
-        if ((item.album || "General") === oldName) {
-          item.album = newName;
+      try {
+        // Update in storedAlbums
+        let stored = await getStoredAlbums();
+        let found = false;
+        stored.forEach(a => {
+          if (a.name === oldName) {
+            a.name = newName;
+            found = true;
+          }
+        });
+        if (!found) {
+          stored.push({ id: `alb-${Date.now()}`, name: newName });
         }
-      });
+        await saveStoredAlbums(stored);
 
-      await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
-      showToast(`Album renamed from "${oldName}" to "${newName}"!`, "success");
-      closeAlbumRename();
-      renderCMSThumbnails(newName);
+        const galleryKey = await window.db.get("cms_content", "gallery_images");
+        const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
+
+        gallery.forEach(item => {
+          if ((item.album || "General") === oldName) {
+            item.album = newName;
+          }
+        });
+
+        await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
+        showToast(`Album renamed from "${oldName}" to "${newName}"!`, "success");
+        closeAlbumRename();
+        renderCMSThumbnails(newName);
+      } catch (err) {
+        console.error("Album rename error:", err);
+        showToast("Failed to rename album.", "danger");
+      } finally {
+        if (renameBtn) {
+          renameBtn.disabled = false;
+          renameBtn.innerText = renameBtn.dataset.origText || "Rename Album";
+        }
+      }
     });
 
     renderCMSThumbnails();
@@ -4175,7 +4380,8 @@ async function renderWebsiteCMS(container) {
       showToast("Landing Page Copy successfully updated & sanitized!", "success");
     });
 
-    document.getElementById("btn-compress-gallery").addEventListener("click", async () => {
+    const compressBtn = document.getElementById("btn-compress-gallery");
+    compressBtn.addEventListener("click", async () => {
       const fileInput = document.getElementById("cms-photo-file");
       const titleInput = document.getElementById("cms-photo-title");
       
@@ -4200,43 +4406,66 @@ async function renderWebsiteCMS(container) {
           showToast(`Album "${album}" created successfully!`, "success");
           newAlbumInput.value = "";
           if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
-          renderCMSThumbnails(album);
+          if (albumSelect) albumSelect.value = "General";
+          await renderCMSThumbnails("General");
           return;
         }
         showToast("Please select at least one image file first.", "warning");
         return;
       }
 
-      // Ensure target album is recorded in stored albums
-      const stored = await getStoredAlbums();
-      if (!stored.some(a => a.name.toLowerCase() === album.toLowerCase())) {
-        stored.push({ id: `alb-${Date.now()}`, name: album, created_at: new Date().toISOString() });
-        await saveStoredAlbums(stored);
-      }
+      // Prevent duplicate clicks & prevent re-submitting while compressing
+      compressBtn.disabled = true;
+      const originalBtnText = compressBtn.innerText;
+      compressBtn.innerText = "⏳ Compressing & Adding to Gallery...";
 
-      showToast(`Compressing ${files.length} image(s)...`, "info");
-      
-      const galleryKey = await window.db.get("cms_content", "gallery_images");
-      const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
+      try {
+        // Ensure target album is recorded in stored albums
+        const stored = await getStoredAlbums();
+        if (!stored.some(a => a.name.toLowerCase() === album.toLowerCase())) {
+          stored.push({ id: `alb-${Date.now()}`, name: album, created_at: new Date().toISOString() });
+          await saveStoredAlbums(stored);
+        }
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const title = baseTitle 
-          ? (files.length > 1 ? `${baseTitle} - ${i + 1}` : baseTitle)
-          : file.name.substring(0, file.name.lastIndexOf('.')) || "Photo";
+        showToast(`Compressing ${files.length} image(s)...`, "info");
         
-        const base64Jpg = await compressImage(file);
-        gallery.push({ title, url: base64Jpg, album });
-      }
+        const galleryKey = await window.db.get("cms_content", "gallery_images");
+        const gallery = galleryKey ? JSON.parse(galleryKey.value) : [];
 
-      await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
-      
-      showToast(`Successfully added ${files.length} photo(s) to "${album}" album!`, "success");
-      fileInput.value = "";
-      titleInput.value = "";
-      newAlbumInput.value = "";
-      if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
-      renderCMSThumbnails(album);
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const title = baseTitle 
+            ? (files.length > 1 ? `${baseTitle} - ${i + 1}` : baseTitle)
+            : file.name.substring(0, file.name.lastIndexOf('.')) || "Photo";
+          
+          const base64Jpg = await compressImage(file);
+          gallery.push({ title, url: base64Jpg, album });
+        }
+
+        await window.db.put("cms_content", { content_key: "gallery_images", value: JSON.stringify(gallery) });
+        
+        showToast(`Successfully added ${files.length} photo(s) to "${album}" album!`, "success");
+
+        // Clear all inputs so selected files and album name leave the target album/gallery and select image file(s) spaces
+        fileInput.value = "";
+        titleInput.value = "";
+        newAlbumInput.value = "";
+        if (newAlbumBar) newAlbumBar.classList.add("portal-hidden");
+        if (albumSelect) albumSelect.value = "General";
+
+        // Expand the target album in preview so user immediately sees their uploaded photos
+        window._cmsAlbumCollapsedState = window._cmsAlbumCollapsedState || {};
+        window._cmsAlbumCollapsedState[album] = false;
+
+        // Render thumbnails with target album space reset to "General" to prevent duplicate additions
+        await renderCMSThumbnails("General");
+      } catch (err) {
+        console.error("Photo compression/addition error:", err);
+        showToast("An error occurred while uploading photos. Please try again.", "danger");
+      } finally {
+        compressBtn.disabled = false;
+        compressBtn.innerText = originalBtnText;
+      }
     });
 
     // ==========================================
@@ -4250,7 +4479,22 @@ async function renderWebsiteCMS(container) {
     async function loadCMSAnnouncements() {
       if (!newsListContainer) return;
       const newsKey = await window.db.get("cms_content", "news_feed");
-      const news = newsKey ? JSON.parse(newsKey.value) : [];
+      let news = newsKey ? JSON.parse(newsKey.value) : [];
+
+      if (Array.isArray(news)) {
+        const filtered = news.filter(item =>
+          item.id !== "news-1" &&
+          item.id !== "news-2" &&
+          item.id !== "news-3" &&
+          item.title !== "New E-Library Portal Launched" &&
+          item.title !== "Upcoming PTA General Meeting" &&
+          item.title !== "Inter-Houses Athletics Competition"
+        );
+        if (filtered.length !== news.length) {
+          news = filtered;
+          await window.db.put("cms_content", { content_key: "news_feed", value: JSON.stringify(news), updated_at: new Date().toISOString() });
+        }
+      }
 
       const countSpan = document.getElementById("cms-total-announcements-count");
       if (countSpan) {
@@ -5105,67 +5349,81 @@ async function renderBroadcastPanel(container) {
 
       rowsContainer.querySelectorAll(".btn-bc-approve").forEach(btn => {
         btn.addEventListener("click", async () => {
-          const reqId = btn.getAttribute("data-id");
-          const reqObj = await window.db.get("broadcast_requests", reqId);
-          if (reqObj) {
-            const updatedMsg = document.getElementById("textarea-bc-msg-" + reqId).value;
-            reqObj.status = "APPROVED";
-            reqObj.message = updatedMsg;
-            reqObj.approver_note = "Dispatched by " + currentUser.role;
-            await window.db.put("broadcast_requests", reqObj);
+          btn.disabled = true;
+          const origText = btn.innerText;
+          btn.innerText = "Authorizing...";
 
-            const allStudents = users.filter(u => u.role === "Student" && u.status === "ACTIVE");
-            let targets = [];
+          try {
+            const reqId = btn.getAttribute("data-id");
+            const reqObj = await window.db.get("broadcast_requests", reqId);
+            if (reqObj) {
+              const updatedMsg = document.getElementById("textarea-bc-msg-" + reqId).value;
+              reqObj.status = "APPROVED";
+              reqObj.message = updatedMsg;
+              reqObj.approver_note = "Dispatched by " + currentUser.role;
+              await window.db.put("broadcast_requests", reqObj);
 
-            if (reqObj.scope === "ALL") {
-              targets = allStudents;
-            } else if (reqObj.scope === "PRE_PRIMARY" || reqObj.scope === "NURSERY" || reqObj.scope === "SECTION_PRE_PRIMARY" || reqObj.scope === "SECTION_NURSERY") {
-              const prePrimaryClassIds = classes.filter(c => {
-                const cn = (c.class_name || "").toLowerCase();
-                return cn.includes("nursery") || cn.includes("creche") || cn.includes("kg") || cn.includes("kindergarten");
-              }).map(c => c.class_id);
-              const matchStudentIds = enrolments.filter(e => prePrimaryClassIds.includes(e.class_id)).map(e => e.student_id);
-              targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
-            } else if (reqObj.scope === "PRIMARY") {
-              const primaryClassIds = classes.filter(c => c.class_name.toLowerCase().includes("primary")).map(c => c.class_id);
-              const matchStudentIds = enrolments.filter(e => primaryClassIds.includes(e.class_id)).map(e => e.student_id);
-              targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
-            } else if (reqObj.scope === "JHS") {
-              const jhsClassIds = classes.filter(c => c.class_name.toLowerCase().includes("jhs")).map(c => c.class_id);
-              const matchStudentIds = enrolments.filter(e => jhsClassIds.includes(e.class_id)).map(e => e.student_id);
-              targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
-            } else {
-              const targetCls = classes.find(c => c.class_name === reqObj.scope);
-              if (targetCls) {
-                const matchStudentIds = enrolments.filter(e => e.class_id === targetCls.class_id).map(e => e.student_id);
+              const allStudents = users.filter(u => u.role === "Student" && u.status === "ACTIVE");
+              let targets = [];
+
+              if (reqObj.scope === "ALL") {
+                targets = allStudents;
+              } else if (reqObj.scope === "PRE_PRIMARY" || reqObj.scope === "NURSERY" || reqObj.scope === "SECTION_PRE_PRIMARY" || reqObj.scope === "SECTION_NURSERY") {
+                const prePrimaryClassIds = classes.filter(c => {
+                  const cn = (c.class_name || "").toLowerCase();
+                  return cn.includes("nursery") || cn.includes("creche") || cn.includes("kg") || cn.includes("kindergarten");
+                }).map(c => c.class_id);
+                const matchStudentIds = enrolments.filter(e => prePrimaryClassIds.includes(e.class_id)).map(e => e.student_id);
                 targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
+              } else if (reqObj.scope === "PRIMARY") {
+                const primaryClassIds = classes.filter(c => c.class_name.toLowerCase().includes("primary")).map(c => c.class_id);
+                const matchStudentIds = enrolments.filter(e => primaryClassIds.includes(e.class_id)).map(e => e.student_id);
+                targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
+              } else if (reqObj.scope === "JHS") {
+                const jhsClassIds = classes.filter(c => c.class_name.toLowerCase().includes("jhs")).map(c => c.class_id);
+                const matchStudentIds = enrolments.filter(e => jhsClassIds.includes(e.class_id)).map(e => e.student_id);
+                targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
+              } else {
+                const targetCls = classes.find(c => c.class_name === reqObj.scope);
+                if (targetCls) {
+                  const matchStudentIds = enrolments.filter(e => e.class_id === targetCls.class_id).map(e => e.student_id);
+                  targets = allStudents.filter(u => matchStudentIds.includes(u.user_id));
+                }
               }
+
+              const phoneMap = new Set();
+              const uniqueTargets = targets.filter(t => {
+                const phone = t.phone || "0240000000";
+                if (phoneMap.has(phone)) return false;
+                phoneMap.add(phone);
+                return true;
+              });
+
+              const profiles = await window.db.getAll("profiles") || [];
+              const parentProfiles = await window.db.getAll("parent_profiles") || [];
+              const parentRelations = await window.db.getAll("parent_student_relations") || [];
+              const transactions = await window.db.getAll("financial_transactions") || [];
+              const attendance = await window.db.getAll("attendance") || [];
+              const authDataCache = { users, profiles, parentProfiles, parentRelations, transactions, attendance };
+
+              let successSent = 0;
+              for (const t of uniqueTargets) {
+                const ctx = await window.api.buildRecipientContext(t, authDataCache);
+                const parentPhone = t.phone || ctx.phone || "0240000000";
+                const personalizedMsg = window.api.resolveBroadcastTags(updatedMsg, ctx);
+                const res = await window.api.sendSMS(parentPhone, `[BROADCAST: ${reqObj.title}] ${personalizedMsg}`);
+                if (res && res.success) successSent++;
+              }
+
+              showToast(`Broadcast approved. Dispatched bulk SMS to ${successSent}/${uniqueTargets.length} parent contacts!`, "success");
+              loadPendingAuthorizations();
             }
-
-            const phoneMap = new Set();
-            const uniqueTargets = targets.filter(t => {
-              const phone = t.phone || "0240000000";
-              if (phoneMap.has(phone)) return false;
-              phoneMap.add(phone);
-              return true;
-            });
-
-            const profiles = await window.db.getAll("profiles") || [];
-            const parentProfiles = await window.db.getAll("parent_profiles") || [];
-            const parentRelations = await window.db.getAll("parent_student_relations") || [];
-            const transactions = await window.db.getAll("financial_transactions") || [];
-            const attendance = await window.db.getAll("attendance") || [];
-            const authDataCache = { users, profiles, parentProfiles, parentRelations, transactions, attendance };
-
-            for (const t of uniqueTargets) {
-              const ctx = await window.api.buildRecipientContext(t, authDataCache);
-              const parentPhone = t.phone || ctx.phone || "0240000000";
-              const personalizedMsg = window.api.resolveBroadcastTags(updatedMsg, ctx);
-              await window.api.sendSMS(parentPhone, `[BROADCAST: ${reqObj.title}] ${personalizedMsg}`);
-            }
-
-            showToast(`Broadcast approved. Dispatched bulk SMS to ${uniqueTargets.length} parent contacts!`, "success");
-            loadPendingAuthorizations();
+          } catch (err) {
+            console.error("Approve broadcast error:", err);
+            showToast("Failed to dispatch broadcast: " + err.message, "danger");
+          } finally {
+            btn.disabled = false;
+            btn.innerText = origText;
           }
         });
       });
@@ -5175,13 +5433,18 @@ async function renderBroadcastPanel(container) {
           const reqId = btn.getAttribute("data-id");
           const note = prompt("Enter rejection reason:");
           if (note !== null) {
-            const reqObj = await window.db.get("broadcast_requests", reqId);
-            if (reqObj) {
-              reqObj.status = "REJECTED";
-              reqObj.approver_note = note || "Rejected by administrator";
-              await window.db.put("broadcast_requests", reqObj);
-              showToast("Broadcast request rejected", "warning");
-              loadPendingAuthorizations();
+            btn.disabled = true;
+            try {
+              const reqObj = await window.db.get("broadcast_requests", reqId);
+              if (reqObj) {
+                reqObj.status = "REJECTED";
+                reqObj.approver_note = note || "Rejected by administrator";
+                await window.db.put("broadcast_requests", reqObj);
+                showToast("Broadcast request rejected", "warning");
+                loadPendingAuthorizations();
+              }
+            } finally {
+              btn.disabled = false;
             }
           }
         });
@@ -5190,6 +5453,12 @@ async function renderBroadcastPanel(container) {
 
     document.getElementById("form-broadcast-sms").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Dispatching SMS Broadcast...";
+      }
 
       const generalTarget = generalSelect ? generalSelect.value : "ALL_STUDENTS";
       const conditionTarget = conditionSelect ? conditionSelect.value : "COND_ALL";
@@ -5208,63 +5477,126 @@ async function renderBroadcastPanel(container) {
         }
       }
 
-      const allUsers = await window.db.getAll("users") || [];
-      const profiles = await window.db.getAll("profiles") || [];
-      const parentProfiles = await window.db.getAll("parent_profiles") || [];
-      const parentRelations = await window.db.getAll("parent_student_relations") || [];
-      const transactions = await window.db.getAll("financial_transactions") || [];
-      const attendance = await window.db.getAll("attendance") || [];
-      const classes = await window.db.getAll("classes") || [];
-      const enrolments = await window.db.getAll("enrolments") || [];
-      const customGroups = await window.db.getAll("custom_recipient_groups") || [];
-      const dispatchDataCache = { users: allUsers, profiles, parentProfiles, parentRelations, transactions, attendance, classes, enrolments, customGroups };
+      try {
+        const allUsers = await window.db.getAll("users") || [];
+        const profiles = await window.db.getAll("profiles") || [];
+        const parentProfiles = await window.db.getAll("parent_profiles") || [];
+        const parentRelations = await window.db.getAll("parent_student_relations") || [];
+        const transactions = await window.db.getAll("financial_transactions") || [];
+        const attendance = await window.db.getAll("attendance") || [];
+        const classes = await window.db.getAll("classes") || [];
+        const enrolments = await window.db.getAll("enrolments") || [];
+        const customGroups = await window.db.getAll("custom_recipient_groups") || [];
+        const dispatchDataCache = { users: allUsers, profiles, parentProfiles, parentRelations, transactions, attendance, classes, enrolments, customGroups };
 
-      const uniqueRecipients = await window.api.getBroadcastRecipients(generalTarget, conditionTarget, customTarget, dispatchDataCache);
+        const uniqueRecipients = await window.api.getBroadcastRecipients(generalTarget, conditionTarget, customTarget, dispatchDataCache);
 
-      if (uniqueRecipients.length === 0) {
-        showToast("No active contacts matched the selected filter target criteria.", "warning");
-        return;
+        if (uniqueRecipients.length === 0) {
+          showToast("No active contacts matched the selected filter target criteria.", "warning");
+          return;
+        }
+
+        showToast(`SMS Broadcast initiated. Sending to ${uniqueRecipients.length} contacts...`, "info");
+
+        const failedRecipients = [];
+        let successCount = 0;
+
+        for (let i = 0; i < uniqueRecipients.length; i++) {
+          const rec = uniqueRecipients[i];
+          if (submitBtn) {
+            submitBtn.innerHTML = `Dispatching SMS (${i + 1}/${uniqueRecipients.length})...`;
+          }
+          const ctx = await window.api.buildRecipientContext(rec, dispatchDataCache);
+          const phone = rec.phone || ctx.phone || "0240000000";
+          const finalMsg = window.api.resolveBroadcastTags(templateMsg, ctx);
+          const res = await window.api.sendSMS(phone, finalMsg);
+          if (res && res.success) {
+            successCount++;
+          } else {
+            failedRecipients.push({ rec, phone, finalMsg, ctx, error: res?.statusDescription || "Failed" });
+          }
+        }
+
+        // Record in Sent Broadcast Master Archive (master template, groups, recipient count)
+        const archiveEntry = {
+          archive_id: "bc-arch-" + Date.now(),
+          timestamp: new Date().toISOString(),
+          sender_name: `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() || currentUser.username || "Admin",
+          sender_role: currentUser.role || "Admin",
+          general_group: generalTarget,
+          conditional_group: conditionTarget,
+          custom_group_name: customGroupName,
+          master_template: templateMsg,
+          recipient_count: successCount,
+          status: failedRecipients.length === 0 ? "DELIVERED" : "PARTIALLY_DELIVERED"
+        };
+        await window.db.put("broadcast_archives", archiveEntry);
+        await loadBroadcastArchive();
+
+        if (failedRecipients.length === 0) {
+          showToast(`Broadcast batch successfully dispatched and logged to Sent Archive (${successCount} recipients)!`, "success");
+          document.getElementById("form-broadcast-sms").reset();
+          selectedCustomMemberIds = [];
+          if (document.getElementById("broad-custom-selected-summary")) {
+            document.getElementById("broad-custom-selected-summary").innerText = "Select a saved group above or click 'Manage / Select Students' to pick specific members.";
+          }
+          if (customGroupBox) customGroupBox.classList.add("portal-hidden");
+          const broadCount = document.getElementById("broad-msg-count");
+          if (broadCount) broadCount.innerText = "0 characters";
+          const broadParts = document.getElementById("broad-sms-parts");
+          if (broadParts) broadParts.innerText = "1 SMS (160 chars/part)";
+          const previewText = document.getElementById("broad-preview-text");
+          if (previewText) previewText.innerText = "(Type a message above with tags to preview live resolution)";
+          refreshTargetRecipientCount();
+        } else {
+          showToast(`Broadcast partially dispatched: ${successCount} sent, ${failedRecipients.length} failed. You can retry failed recipients below.`, "warning");
+          // Display targeted retry banner
+          let retryBox = document.getElementById("broadcast-retry-box");
+          if (!retryBox) {
+            retryBox = document.createElement("div");
+            retryBox.id = "broadcast-retry-box";
+            retryBox.style = "margin-top:1rem; padding:1rem; border:1px solid var(--accent-danger); border-radius:6px; background:rgba(239,68,68,0.06); display:flex; justify-content:space-between; align-items:center; gap:1rem;";
+            document.getElementById("form-broadcast-sms").after(retryBox);
+          }
+          retryBox.innerHTML = `
+            <div>
+              <strong style="color:var(--accent-danger);">⚠️ ${failedRecipients.length} message(s) failed to send</strong>
+              <div style="font-size:0.8rem; color:var(--text-muted);">Duplicate prevention active: retrying will only target the failed recipients.</div>
+            </div>
+            <button type="button" id="btn-retry-failed-broadcast" class="btn btn-sm btn-danger" style="white-space:nowrap;">Retry Failed Only (${failedRecipients.length})</button>
+          `;
+          document.getElementById("btn-retry-failed-broadcast").onclick = async () => {
+            const retryBtn = document.getElementById("btn-retry-failed-broadcast");
+            retryBtn.disabled = true;
+            retryBtn.innerText = "Retrying Failed...";
+            const stillFailed = [];
+            for (const item of failedRecipients) {
+              const rRes = await window.api.sendSMS(item.phone, item.finalMsg, { forceRetry: true });
+              if (!rRes || !rRes.success) {
+                stillFailed.push(item);
+              }
+            }
+            if (stillFailed.length === 0) {
+              showToast("All previously failed messages delivered successfully!", "success");
+              retryBox.remove();
+            } else {
+              showToast(`Retry complete: ${failedRecipients.length - stillFailed.length} recovered, ${stillFailed.length} still failed.`, "warning");
+              failedRecipients.length = 0;
+              stillFailed.forEach(f => failedRecipients.push(f));
+              retryBtn.disabled = false;
+              retryBtn.innerText = `Retry Failed Only (${stillFailed.length})`;
+            }
+          };
+        }
+      } catch (bcErr) {
+        console.error("Broadcast dispatch failure:", bcErr);
+        showToast("Error executing broadcast: " + bcErr.message, "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Queue Broadcast SMS Batch";
+        }
       }
-
-      showToast(`SMS Broadcast initiated. Sending to ${uniqueRecipients.length} contacts...`, "info");
-
-      for (const rec of uniqueRecipients) {
-        const ctx = await window.api.buildRecipientContext(rec, dispatchDataCache);
-        const phone = rec.phone || ctx.phone || "0240000000";
-        const finalMsg = window.api.resolveBroadcastTags(templateMsg, ctx);
-        await window.api.sendSMS(phone, finalMsg);
-      }
-
-      // Record in Sent Broadcast Master Archive (master template, groups, recipient count)
-      const archiveEntry = {
-        archive_id: "bc-arch-" + Date.now(),
-        timestamp: new Date().toISOString(),
-        sender_name: `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() || currentUser.username || "Admin",
-        sender_role: currentUser.role || "Admin",
-        general_group: generalTarget,
-        conditional_group: conditionTarget,
-        custom_group_name: customGroupName,
-        master_template: templateMsg,
-        recipient_count: uniqueRecipients.length,
-        status: "DELIVERED"
-      };
-      await window.db.put("broadcast_archives", archiveEntry);
-      await loadBroadcastArchive();
-
-      showToast(`Broadcast batch successfully dispatched and logged to Sent Archive (${uniqueRecipients.length} recipients)!`, "success");
-      document.getElementById("form-broadcast-sms").reset();
-      selectedCustomMemberIds = [];
-      if (document.getElementById("broad-custom-selected-summary")) {
-        document.getElementById("broad-custom-selected-summary").innerText = "Select a saved group above or click 'Manage / Select Students' to pick specific members.";
-      }
-      if (customGroupBox) customGroupBox.classList.add("portal-hidden");
-      const broadCount = document.getElementById("broad-msg-count");
-      if (broadCount) broadCount.innerText = "0 characters";
-      const broadParts = document.getElementById("broad-sms-parts");
-      if (broadParts) broadParts.innerText = "1 SMS (160 chars/part)";
-      const previewText = document.getElementById("broad-preview-text");
-      if (previewText) previewText.innerText = "(Type a message above with tags to preview live resolution)";
-      refreshTargetRecipientCount();
     });
 
     // Helper to find celebrants in next 7 days
@@ -5378,41 +5710,89 @@ async function renderBroadcastPanel(container) {
 
     // Send Birthdays Trigger (Students & Staff)
     document.getElementById("btn-trigger-birthday-scan").addEventListener("click", async () => {
-      const todayStr = new Date().toISOString().substring(5, 10);
-      const todayCelebrants = users.filter(u => u.date_of_birth && u.date_of_birth.substring(5, 10) === todayStr && u.status === "ACTIVE");
-      
-      if (todayCelebrants.length === 0) {
-        showToast("No active students or staff are celebrating birthdays today.", "info");
-        return;
+      const bdayBtn = document.getElementById("btn-trigger-birthday-scan");
+      if (bdayBtn) {
+        bdayBtn.disabled = true;
+        bdayBtn.dataset.origText = bdayBtn.innerText;
+        bdayBtn.innerText = "Dispatching Greetings...";
       }
 
-      const customMsgTemplate = document.getElementById("birthday-custom-message").value || "Happy Birthday, #student_name#! Father's Joy Academy wishes you a blessed day of growth and excellence!";
-      const studCount = todayCelebrants.filter(u => u.role === "Student").length;
-      const stfCount = todayCelebrants.filter(u => u.role !== "Student").length;
+      try {
+        const todayDateStr = new Date().toISOString().substring(0, 10);
+        const todayMMDD = todayDateStr.substring(5, 10);
+        // Exclude parents and guardians from celebrants as per requirements
+        const todayCelebrants = users.filter(u => u.date_of_birth && u.date_of_birth.substring(5, 10) === todayMMDD && u.status === "ACTIVE" && u.role !== "Parent" && u.role !== "Guardian");
+        
+        if (todayCelebrants.length === 0) {
+          showToast("No active students or staff are celebrating birthdays today.", "info");
+          return;
+        }
 
-      showToast(`Birthday scan: Found ${todayCelebrants.length} celebrants (${studCount} student${studCount === 1 ? '' : 's'}, ${stfCount} staff). Queueing SMS greetings...`, "success");
+        const customMsgTemplate = document.getElementById("birthday-custom-message").value || "Happy Birthday, #student_name#! Father's Joy Academy wishes you a blessed day of growth and excellence!";
 
-      const parentProfiles = await window.db.getAll("parent_profiles") || [];
-      const parentRelations = await window.db.getAll("parent_student_relations") || [];
+        const parentProfiles = await window.db.getAll("parent_profiles") || [];
+        const parentRelations = await window.db.getAll("parent_student_relations") || [];
 
-      todayCelebrants.forEach(user => {
-        let targetPhone = user.phone;
-        if (user.role === "Student" && !targetPhone) {
-          const rel = parentRelations.find(r => r.student_id === user.user_id && r.is_primary);
-          if (rel) {
-            const pProf = parentProfiles.find(p => p.parent_id === rel.parent_id);
-            if (pProf && pProf.phone) targetPhone = pProf.phone;
+        let sentCount = 0;
+        let skippedAlreadySent = 0;
+
+        for (const user of todayCelebrants) {
+          const dispatchDocId = `bday_${todayDateStr}_${user.user_id}`;
+          // Check if already dispatched today in birthday_dispatches
+          const existing = await window.db.get("birthday_dispatches", dispatchDocId);
+          if (existing && existing.status === "SENT") {
+            skippedAlreadySent++;
+            continue;
+          }
+
+          let targetPhone = user.phone;
+          if (user.role === "Student" && !targetPhone) {
+            const rel = parentRelations.find(r => r.student_id === user.user_id && r.is_primary);
+            if (rel) {
+              const pProf = parentProfiles.find(p => p.parent_id === rel.parent_id);
+              if (pProf && pProf.phone) targetPhone = pProf.phone;
+            }
+          }
+
+          if (targetPhone) {
+            const wish = customMsgTemplate
+              .replace(/#student_name#/g, user.first_name)
+              .replace(/#name#/g, user.first_name)
+              .replace(/#role#/g, user.role);
+            
+            const res = await window.api.sendSMS(targetPhone, wish);
+            if (res && res.success) {
+              sentCount++;
+              await window.db.put("birthday_dispatches", {
+                dispatch_id: dispatchDocId,
+                date: todayDateStr,
+                user_id: user.user_id,
+                recipient_name: `${user.first_name} ${user.last_name}`.trim(),
+                role: user.role,
+                phone: targetPhone,
+                status: "SENT",
+                sent_at: new Date().toISOString()
+              });
+            }
           }
         }
 
-        if (targetPhone) {
-          const wish = customMsgTemplate
-            .replace(/#student_name#/g, user.first_name)
-            .replace(/#name#/g, user.first_name)
-            .replace(/#role#/g, user.role);
-          window.api.simulateSMS(targetPhone, wish);
+        if (sentCount > 0) {
+          showToast(`Dispatched birthday greetings to ${sentCount} celebrant(s)${skippedAlreadySent > 0 ? ` (${skippedAlreadySent} skipped as already sent)` : ''}!`, "success");
+        } else if (skippedAlreadySent > 0) {
+          showToast(`All ${skippedAlreadySent} celebrant(s) today have already received their birthday SMS.`, "info");
+        } else {
+          showToast("No active celebrants could be reached (missing phone numbers).", "warning");
         }
-      });
+      } catch (err) {
+        console.error("Birthday scan execution error:", err);
+        showToast("Error executing birthday scan: " + err.message, "danger");
+      } finally {
+        if (bdayBtn) {
+          bdayBtn.disabled = false;
+          bdayBtn.innerText = bdayBtn.dataset.origText || "Trigger Birthday SMS Scan";
+        }
+      }
     });
 
     loadPendingAuthorizations();
@@ -5580,6 +5960,13 @@ async function renderAdmissionsIntake(container) {
     // Hook Submit Approval Form
     approvalForm.onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = approvalForm.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Admitting Student...";
+      }
+
       const id = approveUserIdInput.value;
       const selectedClassId = approveClassSelect.value;
       const feeAmount = parseFloat(document.getElementById("adm-approve-fee-amount").value) || 1800.00;
@@ -5663,6 +6050,8 @@ async function renderAdmissionsIntake(container) {
           }
 
           const allUsers = await window.db.getAll("users") || [];
+          const origin = (typeof window !== "undefined" && window.location && window.location.origin && window.location.origin !== "null") ? window.location.origin : "https://fja-sms.web.app";
+
           for (const pInfo of parentsToLink) {
             const pPhone = pInfo.phone;
             const normPPhone = window.api ? window.api.normalizeGhanaPhone(pPhone) : pPhone;
@@ -5695,6 +6084,19 @@ async function renderAdmissionsIntake(container) {
                 address: studentProfile.address || "Ghana",
                 alt_phone: ""
               });
+
+              // Send Hubtel SMS to Parent to set password
+              if (window.api && parentUser.phone) {
+                const parentSetupLink = `${origin}/portal/index.html?action=set-password&uid=${pUid}&userId=${pId}`;
+                try {
+                  await window.api.sendHubtelSMS(
+                    parentUser.phone,
+                    `Hello ${pFirst}, your Father's Joy Academy Parent portal account is active. Login ID: ${pUid}. To set your password, visit: ${parentSetupLink}`
+                  );
+                } catch (parentSmsErr) {
+                  console.warn("Parent setup SMS dispatch notice:", parentSmsErr);
+                }
+              }
             }
 
             // Create parent_student_relations
@@ -5710,8 +6112,21 @@ async function renderAdmissionsIntake(container) {
           approvalModal.classList.add("portal-hidden");
           showToast(`Admissions approved! ${student.first_name} enrolled in ${enrolledClassName}. Student UID: ${newUid}`, "success");
           
-          if (window.api) {
-            window.api.simulateSMS(student.phone, `Congratulations! Your child ${student.first_name} has been admitted to ${enrolledClassName} at Father's Joy Academy. Student Login ID: ${student.uid}, Password: student123. Initial tuition invoice GH¢ ${feeAmount.toFixed(2)} posted.`);
+          // Send Hubtel SMS for student admission with password setup link
+          const studentSetupLink = `${origin}/portal/index.html?action=set-password&uid=${student.uid}&userId=${student.user_id}`;
+          let studentContactPhone = student.phone || studentProfile.father_phone || studentProfile.mother_phone || "";
+          if (!studentContactPhone && emergency) {
+            studentContactPhone = emergency.phone || emergency.primary?.phone || "";
+          }
+          if (window.api && studentContactPhone) {
+            try {
+              await window.api.sendHubtelSMS(
+                studentContactPhone,
+                `Congratulations! ${student.first_name} has been admitted to ${enrolledClassName} at Father's Joy Academy. Login ID: ${student.uid}. To set your portal password, visit: ${studentSetupLink}. Initial invoice GH¢ ${feeAmount.toFixed(2)} posted.`
+              );
+            } catch (smsErr) {
+              console.warn("Admission Hubtel SMS notice:", smsErr);
+            }
           }
 
           renderAdmissionsIntake(container);
@@ -5719,6 +6134,11 @@ async function renderAdmissionsIntake(container) {
       } catch (err) {
         console.error("Approve admission error:", err);
         showToast("Approval processing error.", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Confirm & Admit";
+        }
       }
     };
 
@@ -5728,20 +6148,29 @@ async function renderAdmissionsIntake(container) {
         const id = btn.getAttribute("data-id");
         const name = btn.getAttribute("data-name");
         if (confirm(`Are you sure you want to reject and remove the intake application for ${name}?`)) {
-          const student = await window.db.get("users", id);
-          await window.db.delete("users", id);
-          
-          const profiles = await window.db.getAll("profiles");
-          const prof = profiles.find(p => p.user_id === id);
-          if (prof) {
-            await window.db.delete("profiles", prof.profile_id);
-          }
+          btn.disabled = true;
+          btn.innerText = "Rejecting...";
+          try {
+            const student = await window.db.get("users", id);
+            await window.db.delete("users", id);
+            
+            const profiles = await window.db.getAll("profiles");
+            const prof = profiles.find(p => p.user_id === id);
+            if (prof) {
+              await window.db.delete("profiles", prof.profile_id);
+            }
 
-          showToast(`Admissions application for ${name} has been declined and removed.`, "info");
-          if (student && student.phone && window.api) {
-            window.api.simulateSMS(student.phone, `Hello, we regret to inform you that your admission application for ${student.first_name} at Father's Joy Academy has been declined at this time.`);
+            showToast(`Admissions application for ${name} has been declined and removed.`, "info");
+            if (student && student.phone && window.api) {
+              await window.api.sendSMS(student.phone, `Hello, we regret to inform you that your admission application for ${student.first_name} at Father's Joy Academy has been declined at this time.`);
+            }
+            renderAdmissionsIntake(container);
+          } catch (rejErr) {
+            console.error("Reject admission error:", rejErr);
+            showToast("Failed to reject admission application", "danger");
+            btn.disabled = false;
+            btn.innerText = "✕ Reject";
           }
-          renderAdmissionsIntake(container);
         }
       });
     });
@@ -6248,6 +6677,13 @@ async function renderFeeLedger(container) {
     // Post payment submission
     document.getElementById("form-record-payment").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Recording Payment...";
+      }
+
       const studentId = document.getElementById("pay-student-id").value;
       const studentName = document.getElementById("pay-student-name").value;
       const amount = parseFloat(document.getElementById("pay-amount").value);
@@ -6256,6 +6692,10 @@ async function renderFeeLedger(container) {
 
       if (amount <= 0) {
         showToast("Amount must be greater than zero", "warning");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Payment";
+        }
         return;
       }
 
@@ -6306,12 +6746,24 @@ async function renderFeeLedger(container) {
       } catch (err) {
         console.error("Payment recording error:", err);
         showToast("Failed to write transaction record", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Payment";
+        }
       }
     });
 
     // Individual bill submission
     document.getElementById("form-post-invoice").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Posting Invoice...";
+      }
+
       const studentId = document.getElementById("inv-student-id").value;
       const studentName = document.getElementById("inv-student-name").value;
       const amount = parseFloat(document.getElementById("inv-amount").value);
@@ -6319,6 +6771,10 @@ async function renderFeeLedger(container) {
 
       if (amount === 0) {
         showToast("Billing amount cannot be zero", "warning");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Post Bill";
+        }
         return;
       }
 
@@ -6362,6 +6818,11 @@ async function renderFeeLedger(container) {
       } catch (err) {
         console.error("Invoice post failed:", err);
         showToast("Failed to post bill charge", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Post Bill";
+        }
       }
     });
 
@@ -6373,12 +6834,23 @@ async function renderFeeLedger(container) {
     // Group billing submission
     document.getElementById("form-group-billing").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Posting Group Invoices...";
+      }
+
       const scope = document.getElementById("gb-target-scope").value;
       const amount = parseFloat(document.getElementById("gb-amount").value);
       const ref = document.getElementById("gb-ref").value;
 
       if (amount === 0) {
         showToast("Amount cannot be zero", "warning");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Post Group Invoices";
+        }
         return;
       }
 
@@ -6431,6 +6903,11 @@ async function renderFeeLedger(container) {
         loadLedgerList();
       } catch (err) {
         showToast("Error executing bulk group billing", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Post Group Invoices";
+        }
       }
     });
 
@@ -6449,6 +6926,13 @@ async function renderFeeLedger(container) {
       if (amount === 0) {
         showToast("Amount cannot be zero", "warning");
         return;
+      }
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Posting Terminal Fees...";
       }
 
       try {
@@ -6498,6 +6982,11 @@ async function renderFeeLedger(container) {
         loadLedgerList();
       } catch (err) {
         showToast("Error posting bulk terminal fees", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Post Terminal Fees";
+        }
       }
     });
 
@@ -7266,7 +7755,15 @@ async function renderPayrollEngine(container) {
     // Process active batch
     processBtn.addEventListener("click", async () => {
       const activePeriod = "2026-08";
-      if (confirm(`Proceed to finalize and post payroll Net payouts to ledger and dispatch SMS slip alerts for pay period: ${activePeriod}?`)) {
+      if (!confirm(`Proceed to finalize and post payroll Net payouts to ledger and dispatch SMS slip alerts for pay period: ${activePeriod}?`)) {
+        return;
+      }
+
+      processBtn.disabled = true;
+      const originalText = processBtn.innerText;
+      processBtn.innerText = "Processing Payroll...";
+
+      try {
         let expenseSum = 0;
         let count = 0;
 
@@ -7316,6 +7813,12 @@ async function renderPayrollEngine(container) {
 
         showToast(`Payroll processed successfully for ${count} staff members. Total Net: GHS ${expenseSum.toFixed(2)}`, "success");
         loadActivePayroll();
+      } catch (err) {
+        console.error("Error processing payroll:", err);
+        showToast("Error processing payroll: " + (err.message || err), "error");
+      } finally {
+        processBtn.disabled = false;
+        processBtn.innerText = originalText;
       }
     });
 
@@ -8070,55 +8573,65 @@ async function renderTeacherAttendance(container) {
 
     datePicker.addEventListener("change", loadAttendanceRoster);
 
-    document.getElementById("btn-save-student-attendance").addEventListener("click", async () => {
-      const dateStr = datePicker.value;
-      const selects = rosterRows.querySelectorAll(".student-att-select");
-      const isOnline = navigator.onLine;
+    const saveBtn = document.getElementById("btn-save-student-attendance");
+    if (saveBtn) {
+      saveBtn.addEventListener("click", async () => {
+        const dateStr = datePicker.value;
+        const selects = rosterRows.querySelectorAll(".student-att-select");
+        const isOnline = navigator.onLine;
 
-      try {
-        for (const select of selects) {
-          const studentId = select.getAttribute("data-user-id");
-          const status = select.value;
+        saveBtn.disabled = true;
+        const origText = saveBtn.innerText;
+        saveBtn.innerText = "Submitting Attendance...";
 
-          const attId = `att-student-${studentId}-${dateStr}`;
-          const record = {
-            attendance_id: attId,
-            user_id: studentId,
-            marked_by: currentUser.user_id,
-            date: dateStr,
-            status: status,
-            synced: isOnline // Saved locally first, flagged unsynced if offline
-          };
-          await window.db.put("attendance", record);
-        }
+        try {
+          for (const select of selects) {
+            const studentId = select.getAttribute("data-user-id");
+            const status = select.value;
 
-        if (isOnline) {
-          showToast("Daily attendance roster synchronized successfully!", "success");
-        } else {
-          showToast("Attendance saved locally (Offline Mode). Auto-sync scheduled.", "warning");
-        }
+            const attId = `att-student-${studentId}-${dateStr}`;
+            const record = {
+              attendance_id: attId,
+              user_id: studentId,
+              marked_by: currentUser.user_id,
+              date: dateStr,
+              status: status,
+              synced: isOnline // Saved locally first, flagged unsynced if offline
+            };
+            await window.db.put("attendance", record);
+          }
 
-        // Trigger SMS warnings to parents for absent students (with de-duplication check)
-        for (const select of selects) {
-          const studentId = select.getAttribute("data-user-id");
-          const status = select.value;
-          if (status === "ABSENT") {
-            const smsDedupeKey = `fja_absent_sms_${studentId}_${dateStr}`;
-            if (!localStorage.getItem(smsDedupeKey)) {
-              const studentObj = await window.db.get("users", studentId);
-              if (studentObj) {
-                await window.api.simulateSMS(studentObj.phone, `Alert: Your child ${studentObj.first_name} was marked ABSENT from classes today (${dateStr}).`);
-                localStorage.setItem(smsDedupeKey, new Date().toISOString());
+          if (isOnline) {
+            showToast("Daily attendance roster synchronized successfully!", "success");
+          } else {
+            showToast("Attendance saved locally (Offline Mode). Auto-sync scheduled.", "warning");
+          }
+
+          // Trigger SMS warnings to parents for absent students (with de-duplication check)
+          for (const select of selects) {
+            const studentId = select.getAttribute("data-user-id");
+            const status = select.value;
+            if (status === "ABSENT") {
+              const smsDedupeKey = `fja_absent_sms_${studentId}_${dateStr}`;
+              if (!localStorage.getItem(smsDedupeKey)) {
+                const studentObj = await window.db.get("users", studentId);
+                if (studentObj) {
+                  await window.api.simulateSMS(studentObj.phone, `Alert: Your child ${studentObj.first_name} was marked ABSENT from classes today (${dateStr}).`);
+                  localStorage.setItem(smsDedupeKey, new Date().toISOString());
+                }
               }
             }
           }
-        }
 
-      } catch (err) {
-        console.error("Save student attendance failed:", err);
-        showToast("Error updating database.", "danger");
-      }
-    });
+        } catch (err) {
+          console.error("Save student attendance failed:", err);
+          showToast("Error updating database.", "danger");
+        } finally {
+          saveBtn.disabled = false;
+          saveBtn.innerText = origText;
+        }
+      });
+    }
 
     loadAttendanceRoster();
 
@@ -9647,6 +10160,10 @@ async function renderTeacherGrading(container) {
             return;
           }
 
+          btn.disabled = true;
+          const origText = btn.innerText;
+          btn.innerText = "Saving...";
+
           try {
             const promoteChk = rosterBody.querySelector(`.promote-chk[data-user-id="${id}"]`);
             const isTeacherPromoted = promoteChk ? promoteChk.checked : false;
@@ -9680,6 +10197,10 @@ async function renderTeacherGrading(container) {
             }
           } catch (err) {
             console.error("Save grades failed:", err);
+            showToast("Error saving grade: " + (err.message || err), "danger");
+          } finally {
+            btn.disabled = false;
+            btn.innerText = origText;
           }
         });
       });
@@ -12844,6 +13365,13 @@ async function renderFinanceAccounts(container) {
 
     document.getElementById("form-add-income").onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Saving Income...";
+      }
+
       const category = document.getElementById("inc-category").value;
       const amount = parseFloat(document.getElementById("inc-amount").value);
       const payer = document.getElementById("inc-payer").value;
@@ -12869,11 +13397,23 @@ async function renderFinanceAccounts(container) {
         loadIncomes();
       } catch (err) {
         showToast("Error saving income transaction", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Income";
+        }
       }
     };
 
     document.getElementById("form-add-expense").onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Saving Expense...";
+      }
+
       const category = document.getElementById("exp-category").value;
       const amount = parseFloat(document.getElementById("exp-amount").value);
       const vendor = document.getElementById("exp-vendor").value;
@@ -12899,11 +13439,23 @@ async function renderFinanceAccounts(container) {
         loadExpenses();
       } catch (err) {
         showToast("Error saving expense transaction", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Expense";
+        }
       }
     };
 
     document.getElementById("form-add-receivable").onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Posting Receivable...";
+      }
+
       const debtor = document.getElementById("rec-debtor").value;
       const desc = document.getElementById("rec-desc").value;
       const amount = parseFloat(document.getElementById("rec-amount").value);
@@ -12929,11 +13481,23 @@ async function renderFinanceAccounts(container) {
         loadReceivables();
       } catch (err) {
         showToast("Error posting receivable", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Add Receivable";
+        }
       }
     };
 
     document.getElementById("form-add-payable").onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.origText = submitBtn.innerHTML;
+        submitBtn.innerHTML = "Posting Payable...";
+      }
+
       const vendor = document.getElementById("pay-vendor").value;
       const desc = document.getElementById("pay-desc").value;
       const amount = parseFloat(document.getElementById("pay-amount").value);
@@ -12959,6 +13523,11 @@ async function renderFinanceAccounts(container) {
         loadPayables();
       } catch (err) {
         showToast("Error posting payable", "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Add Payable";
+        }
       }
     };
 
@@ -15067,8 +15636,21 @@ async function renderRecordsManagement(container) {
     // FORM SUBMIT HANDLER: Direct Admin Record Edit
     document.getElementById("form-admin-edit-record").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const saveBtn = document.getElementById("btn-save-admin-edit") || e.target.querySelector('button[type="submit"]');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.dataset.origText = saveBtn.innerHTML;
+        saveBtn.innerHTML = "Saving Changes...";
+      }
+
       const targetUserId = document.getElementById("edit-rec-user-id").value;
-      if (!targetUserId) return;
+      if (!targetUserId) {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = saveBtn.dataset.origText || "💾 Save Changes";
+        }
+        return;
+      }
 
       try {
         const u = await window.db.get("users", targetUserId);
@@ -15320,6 +15902,11 @@ async function renderRecordsManagement(container) {
       } catch (err) {
         console.error("Direct record edit error:", err);
         showToast("Failed to update record: " + err.message, "danger");
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = saveBtn.dataset.origText || "💾 Save Changes";
+        }
       }
     });
 
@@ -16417,18 +17004,9 @@ async function renderAcademicCalendar(container) {
   try {
     let cal = await window.db.get("academic_calendar", "main-calendar") || {};
     
-    // Auto-normalize legacy calendar structure if needed
-    if (!cal.events || !Array.isArray(cal.events) || cal.events.length === 0) {
-      cal.events = [
-        { id: "ev-term1", name: "2025/2026 First Academic Term", start_date: cal.term1_start || "2026-01-05", end_date: cal.term1_end || "2026-04-15", time: "", notes: "Foundational academic instructions and assessments." },
-        { id: "ev-term2", name: "2025/2026 Second Academic Term", start_date: cal.term2_start || "2026-05-04", end_date: cal.term2_end || "2026-07-31", time: "", notes: "Mid-year academic studies and STEM projects." },
-        { id: "ev-term3", name: "2025/2026 Third Academic Term", start_date: cal.term3_start || "2026-08-03", end_date: cal.term3_end || "2026-12-15", time: "", notes: "Promotional examinations and annual speech & prize giving." },
-        { id: "ev-pta", name: "PTA General Assembly & Parents Forum", start_date: cal.pta_date || "2026-09-19", end_date: cal.pta_date || "2026-09-19", time: "10:00", notes: "General assembly in the school auditorium." },
-        { id: "ev-midterm", name: "Mid-Term Vacation Break", start_date: cal.midterm_start || "2026-10-12", end_date: cal.midterm_end || "2026-10-16", time: "", notes: "School-wide rest break for all learners and staff." },
-        { id: "ev-exam", name: "Term Promotional & Final Examinations Week", start_date: cal.exam_start || "2026-11-30", end_date: cal.exam_end || "2026-12-04", time: "", notes: "Standardized promotion and final grading examinations." }
-      ];
-      cal.calendar_id = "main-calendar";
-      await window.db.put("academic_calendar", cal);
+    // Ensure cal.events is an array if uninitialized; preserve empty list when user deletes events
+    if (!cal.events || !Array.isArray(cal.events)) {
+      cal.events = [];
     }
     
     const canEditCalendar = ["Proprietor", "HeadTeacher", "Admin"].includes(currentUser.role);
@@ -16603,7 +17181,7 @@ async function renderAcademicCalendar(container) {
 
               <div class="form-group">
                 <label class="form-label">Event Name / Title <span style="color:var(--accent-danger)">*</span></label>
-                <input type="text" id="event-name" class="form-control" placeholder="e.g. 2025/2026 First Academic Term" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+                <input type="text" id="event-name" class="form-control" placeholder="e.g. 2026/2027 First Academic Term" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
               </div>
 
               <div class="grid-2" style="gap:1rem;">
@@ -16741,87 +17319,99 @@ async function renderAcademicCalendar(container) {
     const btnSaveTerms = document.getElementById("btn-save-canonical-terms");
     if (btnSaveTerms) {
       btnSaveTerms.addEventListener("click", async () => {
-        const acadYear = (document.getElementById("terms-acad-year") || {}).value || "2026/2027";
-        const t1Start = (document.getElementById("t1-start") || {}).value;
-        const t1End = (document.getElementById("t1-end") || {}).value;
-        const t1MidStart = (document.getElementById("t1-mid-start") || {}).value;
-        const t1MidEnd = (document.getElementById("t1-mid-end") || {}).value;
-        const t1Holidays = parseInt((document.getElementById("t1-holidays") || {}).value, 10) || 0;
-        const c1 = calculateTermExpectedDays(t1Start, t1End, t1MidStart, t1MidEnd, t1Holidays);
+        btnSaveTerms.disabled = true;
+        const origText = btnSaveTerms.innerText;
+        btnSaveTerms.innerText = "Saving Terms...";
 
-        const t2Start = (document.getElementById("t2-start") || {}).value;
-        const t2End = (document.getElementById("t2-end") || {}).value;
-        const t2MidStart = (document.getElementById("t2-mid-start") || {}).value;
-        const t2MidEnd = (document.getElementById("t2-mid-end") || {}).value;
-        const t2Holidays = parseInt((document.getElementById("t2-holidays") || {}).value, 10) || 0;
-        const c2 = calculateTermExpectedDays(t2Start, t2End, t2MidStart, t2MidEnd, t2Holidays);
+        try {
+          const acadYear = (document.getElementById("terms-acad-year") || {}).value || "2026/2027";
+          const t1Start = (document.getElementById("t1-start") || {}).value;
+          const t1End = (document.getElementById("t1-end") || {}).value;
+          const t1MidStart = (document.getElementById("t1-mid-start") || {}).value;
+          const t1MidEnd = (document.getElementById("t1-mid-end") || {}).value;
+          const t1Holidays = parseInt((document.getElementById("t1-holidays") || {}).value, 10) || 0;
+          const c1 = calculateTermExpectedDays(t1Start, t1End, t1MidStart, t1MidEnd, t1Holidays);
 
-        const t3Start = (document.getElementById("t3-start") || {}).value;
-        const t3End = (document.getElementById("t3-end") || {}).value;
-        const t3MidStart = (document.getElementById("t3-mid-start") || {}).value;
-        const t3MidEnd = (document.getElementById("t3-mid-end") || {}).value;
-        const t3Holidays = parseInt((document.getElementById("t3-holidays") || {}).value, 10) || 0;
-        const c3 = calculateTermExpectedDays(t3Start, t3End, t3MidStart, t3MidEnd, t3Holidays);
+          const t2Start = (document.getElementById("t2-start") || {}).value;
+          const t2End = (document.getElementById("t2-end") || {}).value;
+          const t2MidStart = (document.getElementById("t2-mid-start") || {}).value;
+          const t2MidEnd = (document.getElementById("t2-mid-end") || {}).value;
+          const t2Holidays = parseInt((document.getElementById("t2-holidays") || {}).value, 10) || 0;
+          const c2 = calculateTermExpectedDays(t2Start, t2End, t2MidStart, t2MidEnd, t2Holidays);
 
-        const freshCal = await window.db.get("academic_calendar", "main-calendar") || {};
-        freshCal.canonical_terms = {
-          academic_year: acadYear,
-          term1: {
-            start_date: t1Start,
-            end_date: t1End,
-            midterm_start: t1MidStart,
-            midterm_end: t1MidEnd,
-            public_holidays: t1Holidays,
-            net_days: c1.netSchoolDays
-          },
-          term2: {
-            start_date: t2Start,
-            end_date: t2End,
-            midterm_start: t2MidStart,
-            midterm_end: t2MidEnd,
-            public_holidays: t2Holidays,
-            net_days: c2.netSchoolDays
-          },
-          term3: {
-            start_date: t3Start,
-            end_date: t3End,
-            midterm_start: t3MidStart,
-            midterm_end: t3MidEnd,
-            public_holidays: t3Holidays,
-            net_days: c3.netSchoolDays
+          const t3Start = (document.getElementById("t3-start") || {}).value;
+          const t3End = (document.getElementById("t3-end") || {}).value;
+          const t3MidStart = (document.getElementById("t3-mid-start") || {}).value;
+          const t3MidEnd = (document.getElementById("t3-mid-end") || {}).value;
+          const t3Holidays = parseInt((document.getElementById("t3-holidays") || {}).value, 10) || 0;
+          const c3 = calculateTermExpectedDays(t3Start, t3End, t3MidStart, t3MidEnd, t3Holidays);
+
+          const freshCal = await window.db.get("academic_calendar", "main-calendar") || {};
+          freshCal.canonical_terms = {
+            academic_year: acadYear,
+            term1: {
+              start_date: t1Start,
+              end_date: t1End,
+              midterm_start: t1MidStart,
+              midterm_end: t1MidEnd,
+              public_holidays: t1Holidays,
+              net_days: c1.netSchoolDays
+            },
+            term2: {
+              start_date: t2Start,
+              end_date: t2End,
+              midterm_start: t2MidStart,
+              midterm_end: t2MidEnd,
+              public_holidays: t2Holidays,
+              net_days: c2.netSchoolDays
+            },
+            term3: {
+              start_date: t3Start,
+              end_date: t3End,
+              midterm_start: t3MidStart,
+              midterm_end: t3MidEnd,
+              public_holidays: t3Holidays,
+              net_days: c3.netSchoolDays
+            }
+          };
+          freshCal.academic_year = acadYear;
+          freshCal.term1_start = t1Start;
+          freshCal.term1_end = t1End;
+          freshCal.term2_start = t2Start;
+          freshCal.term2_end = t2End;
+          freshCal.term3_start = t3Start;
+          freshCal.term3_end = t3End;
+          freshCal.midterm_start = t1MidStart;
+          freshCal.midterm_end = t1MidEnd;
+
+          // Synchronize matching events in events list if present
+          if (Array.isArray(freshCal.events)) {
+            const e1 = freshCal.events.find(e => /term\s*1/i.test(e.name));
+            if (e1) { e1.start_date = t1Start; e1.end_date = t1End; }
+            const e2 = freshCal.events.find(e => /term\s*2/i.test(e.name));
+            if (e2) { e2.start_date = t2Start; e2.end_date = t2End; }
+            const e3 = freshCal.events.find(e => /term\s*3/i.test(e.name));
+            if (e3) { e3.start_date = t3Start; e3.end_date = t3End; }
           }
-        };
-        freshCal.academic_year = acadYear;
-        freshCal.term1_start = t1Start;
-        freshCal.term1_end = t1End;
-        freshCal.term2_start = t2Start;
-        freshCal.term2_end = t2End;
-        freshCal.term3_start = t3Start;
-        freshCal.term3_end = t3End;
-        freshCal.midterm_start = t1MidStart;
-        freshCal.midterm_end = t1MidEnd;
 
-        // Synchronize matching events in events list if present
-        if (Array.isArray(freshCal.events)) {
-          const e1 = freshCal.events.find(e => /term\s*1/i.test(e.name));
-          if (e1) { e1.start_date = t1Start; e1.end_date = t1End; }
-          const e2 = freshCal.events.find(e => /term\s*2/i.test(e.name));
-          if (e2) { e2.start_date = t2Start; e2.end_date = t2End; }
-          const e3 = freshCal.events.find(e => /term\s*3/i.test(e.name));
-          if (e3) { e3.start_date = t3Start; e3.end_date = t3End; }
+          freshCal.calendar_id = "main-calendar";
+          freshCal.updated_at = new Date().toISOString();
+          await window.db.put("academic_calendar", freshCal);
+          await initAcademicCalendarCache();
+
+          if (window.api && typeof window.api.syncToFirebase === "function") {
+            window.api.syncToFirebase("academic_calendar", freshCal).catch(() => {});
+          }
+
+          refreshCanonicalTermBadges();
+          showToast("Canonical Academic Terms saved and attendance days calibrated successfully!", "success");
+        } catch (err) {
+          console.error("Save canonical terms failed:", err);
+          showToast("Error saving academic terms: " + (err.message || err), "danger");
+        } finally {
+          btnSaveTerms.disabled = false;
+          btnSaveTerms.innerText = origText;
         }
-
-        freshCal.calendar_id = "main-calendar";
-        freshCal.updated_at = new Date().toISOString();
-        await window.db.put("academic_calendar", freshCal);
-        await initAcademicCalendarCache();
-
-        if (window.api && typeof window.api.syncToFirebase === "function") {
-          window.api.syncToFirebase("academic_calendar", freshCal).catch(() => {});
-        }
-
-        refreshCanonicalTermBadges();
-        showToast("Canonical Academic Terms saved and attendance days calibrated successfully!", "success");
       });
     }
     const formatOrdinal = (dStr) => {
@@ -18009,31 +18599,41 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
           `;
         }).join("");
 
-        document.getElementById("btn-save-staff-attendance").addEventListener("click", async () => {
-          const selects = staffRoster.querySelectorAll(".staff-status-select");
-          const dateStr = new Date().toISOString().split("T")[0];
+        const btnSaveStaffAtt = document.getElementById("btn-save-staff-attendance");
+        if (btnSaveStaffAtt) {
+          btnSaveStaffAtt.addEventListener("click", async () => {
+            const selects = staffRoster.querySelectorAll(".staff-status-select");
+            const dateStr = new Date().toISOString().split("T")[0];
 
-          try {
-            for (const select of selects) {
-              const userId = select.getAttribute("data-user-id");
-              const status = select.value;
+            btnSaveStaffAtt.disabled = true;
+            const origText = btnSaveStaffAtt.innerText;
+            btnSaveStaffAtt.innerText = "Saving Attendance...";
 
-              const attId = `att-staff-${userId}-${dateStr}`;
-              const record = {
-                attendance_id: attId,
-                user_id: userId,
-                marked_by: currentUser.user_id,
-                date: dateStr,
-                status: status
-              };
-              await window.db.put("attendance", record);
+            try {
+              for (const select of selects) {
+                const userId = select.getAttribute("data-user-id");
+                const status = select.value;
+
+                const attId = `att-staff-${userId}-${dateStr}`;
+                const record = {
+                  attendance_id: attId,
+                  user_id: userId,
+                  marked_by: currentUser.user_id,
+                  date: dateStr,
+                  status: status
+                };
+                await window.db.put("attendance", record);
+              }
+              showToast("Staff attendance records saved successfully!", "success");
+            } catch (err) {
+              console.error("Save staff attendance error:", err);
+              showToast("Failed to save records.", "danger");
+            } finally {
+              btnSaveStaffAtt.disabled = false;
+              btnSaveStaffAtt.innerText = origText;
             }
-            showToast("Staff attendance records saved successfully!", "success");
-          } catch (err) {
-            console.error("Save staff attendance error:", err);
-            showToast("Failed to save records.", "danger");
-          }
-        });
+          });
+        }
       }
     }
 
@@ -18718,6 +19318,13 @@ async function renderQuestionnairesPortal(container) {
 // ==========================================
 async function initDailyBirthdayAutoScheduler() {
   try {
+    // Enforce scheduled time check: only automatically dispatch at or after 09:00 AM GMT (Africa/Accra)
+    const currentUtcHour = new Date().getUTCHours();
+    if (currentUtcHour < 9) {
+      console.log(`[Automated Birthday SMS Scheduler] Current hour is ${currentUtcHour}:00 GMT. Automated greetings are scheduled for 09:00 GMT.`);
+      return;
+    }
+
     const today = new Date();
     const todayKey = today.toISOString().substring(0, 10);
     const lastScan = localStorage.getItem("fja_last_bday_scan");
@@ -18730,16 +19337,25 @@ async function initDailyBirthdayAutoScheduler() {
     if (!users || users.length === 0) return;
 
     const todayMMDD = todayKey.substring(5, 10);
-    const todayCelebrants = users.filter(u => u.date_of_birth && u.date_of_birth.substring(5, 10) === todayMMDD && u.status === "ACTIVE");
+    // Exclude parents and guardians from celebrants as per requirements
+    const todayCelebrants = users.filter(u => u.date_of_birth && u.date_of_birth.substring(5, 10) === todayMMDD && u.status === "ACTIVE" && u.role !== "Parent" && u.role !== "Guardian");
 
     if (todayCelebrants.length > 0) {
-      console.log(`[Automated Birthday SMS Scheduler] Found ${todayCelebrants.length} active celebrant(s) today (${todayKey}). Dispatching greetings to students & staff...`);
+      console.log(`[Automated Birthday SMS Scheduler] Found ${todayCelebrants.length} active celebrant(s) today (${todayKey}). Verifying dispatches...`);
       const defaultTemplate = localStorage.getItem("fja_custom_bday_template") || "Happy Birthday, #student_name#! Father's Joy Academy wishes you a blessed day of growth and excellence!";
 
       const parentProfiles = await window.db.getAll("parent_profiles") || [];
       const parentRelations = await window.db.getAll("parent_student_relations") || [];
 
       for (const celebrant of todayCelebrants) {
+        const dispatchDocId = `bday_${todayKey}_${celebrant.user_id}`;
+        // Idempotency check: verify if an SMS has already been sent to this celebrant today
+        const existing = await window.db.get("birthday_dispatches", dispatchDocId);
+        if (existing && existing.status === "SENT") {
+          console.log(`[Automated Birthday SMS Scheduler] Skipping ${celebrant.first_name} (${celebrant.uid}): already sent today.`);
+          continue;
+        }
+
         let targetPhone = celebrant.phone;
         if (celebrant.role === "Student" && !targetPhone) {
           const rel = parentRelations.find(r => r.student_id === celebrant.user_id && r.is_primary);
@@ -18754,8 +19370,21 @@ async function initDailyBirthdayAutoScheduler() {
             .replace(/#student_name#/g, celebrant.first_name)
             .replace(/#name#/g, celebrant.first_name)
             .replace(/#role#/g, celebrant.role);
-          if (window.api && typeof window.api.simulateSMS === "function") {
-            window.api.simulateSMS(targetPhone, wish);
+          
+          if (window.api && typeof window.api.sendSMS === "function") {
+            const res = await window.api.sendSMS(targetPhone, wish);
+            if (res && res.success) {
+              await window.db.put("birthday_dispatches", {
+                dispatch_id: dispatchDocId,
+                date: todayKey,
+                user_id: celebrant.user_id,
+                recipient_name: `${celebrant.first_name} ${celebrant.last_name}`.trim(),
+                role: celebrant.role,
+                phone: targetPhone,
+                status: "SENT",
+                sent_at: new Date().toISOString()
+              });
+            }
           }
         }
       }
@@ -18931,7 +19560,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     const userId = urlParams.get("userId");
 
     try {
-      const user = await window.db.get("users", userId);
+      let user = await window.db.get("users", userId);
+      if (!user && window.firebase && window.firebase.firestore) {
+        try {
+          const snap = await window.firebase.firestore().collection("users").doc(userId).get();
+          if (snap.exists) {
+            user = snap.data();
+            await window.db.putLocal("users", user);
+          }
+        } catch (cloudErr) {
+          console.warn("Direct cloud user lookup notice:", cloudErr);
+        }
+      }
+
       if (user && user.uid === uid && (user.status === "ACTIVE" || user.status === "PENDING_PASSWORD")) {
         document.getElementById("set-pwd-uid").value = uid;
         document.getElementById("set-pwd-userid").value = userId;
@@ -18977,6 +19618,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // --- Submit handler for form-set-new-password ---
   document.getElementById("form-set-new-password").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.dataset.origText = submitBtn.innerHTML;
+      submitBtn.innerHTML = "Activating Password...";
+    }
+
     const uid = document.getElementById("set-pwd-uid").value;
     const userId = document.getElementById("set-pwd-userid").value;
     const newPwd = document.getElementById("set-pwd-input").value;
@@ -18984,10 +19632,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (newPwd.length < 6) {
       showToast("Password must be at least 6 characters.", "warning");
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.origText || "Activate & Save Password";
+      }
       return;
     }
     if (newPwd !== confirmPwd) {
       showToast("Passwords do not match.", "warning");
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.origText || "Activate & Save Password";
+      }
       return;
     }
 
@@ -19008,7 +19664,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       // Update Local IndexedDB
-      const user = await window.db.get("users", userId);
+      let user = await window.db.get("users", userId);
+      if (!user && window.firebase && window.firebase.firestore) {
+        try {
+          const snap = await window.firebase.firestore().collection("users").doc(userId).get();
+          if (snap.exists) user = snap.data();
+        } catch (e) {}
+      }
+
       if (user) {
         user.password_hash = await window.api.hashPassword(newPwd);
         user.is_temporal_pwd = false;
@@ -19035,6 +19698,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       console.error("Password initialization failed:", err);
       showToast("Account activation failed: " + err.message, "danger");
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = submitBtn.dataset.origText || "Activate & Save Password";
+      }
     }
   });
 });
