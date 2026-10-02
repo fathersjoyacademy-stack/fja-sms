@@ -28,6 +28,7 @@ async function verify() {
   console.log('  Contains Mr. Ernest Brew Paintsil (Proprietor):', website.body.includes('Mr. Ernest Brew Paintsil') && website.body.includes('Proprietor'));
   console.log('  Contains Mad. Abigail Sarfo (Head, Management):', website.body.includes('Mad. Abigail Sarfo') && website.body.includes('Head, Management'));
   console.log('  Contains Mad. Delphina Kwarah (Supervisor):', website.body.includes('Mad. Delphina Kwarah'));
+  console.log('  Contact Us card centered styling:', website.body.includes('text-align:center') || website.body.includes('text-align: center'));
 
   const leadershipPhoto = await fetchUrl('https://fja-sms.web.app/website/assets/leadership/shadrach-dampson.jpeg');
   console.log('\nLeadership Photo Asset (/website/assets/leadership/shadrach-dampson.jpeg):', leadershipPhoto.status);
@@ -53,7 +54,7 @@ async function verify() {
 
   const sw = await fetchUrl('https://fja-sms.web.app/portal/sw.js');
   console.log('\nService Worker Status:', sw.status);
-  console.log('  SW Version v45:', sw.body.includes('school-mgt-v45'));
+  console.log('  SW Version v46:', sw.body.includes('school-mgt-v46'));
 
   const api = await fetchUrl('https://fja-sms.web.app/portal/api.js');
   console.log('\nAPI Engine Status:', api.status);

@@ -121,7 +121,7 @@ passedTests++;
 // -------------------------------------------------------------------------
 // Service Worker Cache Versioning
 // -------------------------------------------------------------------------
-assert.ok(swJs.includes('school-mgt-v45') || swJs.includes('school-mgt-v44') || swJs.includes('school-mgt-v43') || swJs.includes('school-mgt-v42'), 'sw.js must be bumped to school-mgt-v45, v44, v43, or v42');
+assert.ok(swJs.includes('school-mgt-v46') || swJs.includes('school-mgt-v45') || swJs.includes('school-mgt-v44') || swJs.includes('school-mgt-v43') || swJs.includes('school-mgt-v42'), 'sw.js must be bumped to school-mgt-v46, v45, v44, v43, or v42');
 
 console.log('========================================================================');
 console.log(`ALL ${passedTests}/${totalTests} CORE REQUIREMENTS AUDITED & VERIFIED SUCCESSFULLY!`);
