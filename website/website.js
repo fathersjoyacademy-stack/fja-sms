@@ -23,6 +23,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnThemeMobile = document.getElementById("btn-theme-toggle-mobile");
   if (btnThemeMobile) btnThemeMobile.addEventListener("click", toggleTheme);
 
+  // Initialize Dynamic School Honeycomb Background
+  const schoolGrid = document.getElementById("school-honeycomb-grid");
+  if (schoolGrid && window.SchoolHoneycombEngine) {
+    window.schoolHoneycomb = new SchoolHoneycombEngine(schoolGrid);
+  }
+
   // Mobile Menu drawer
   const mobileMenu = document.getElementById("landing-mobile-menu");
   const menuToggleBtn = document.getElementById("btn-mobile-menu-toggle");
@@ -112,6 +118,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (galleryKey) {
       const gallery = JSON.parse(galleryKey.value);
       
+      // Feed uploaded CMS gallery photos into the live honeycomb background
+      if (Array.isArray(gallery) && gallery.length > 0 && window.schoolHoneycomb) {
+        const cmsPhotoUrls = gallery.map(item => item.url).filter(Boolean);
+        if (cmsPhotoUrls.length > 0) {
+          window.schoolHoneycomb.setImages(cmsPhotoUrls);
+        }
+      }
+
       const albums = {};
       gallery.forEach(item => {
         const albumName = item.album || "General";

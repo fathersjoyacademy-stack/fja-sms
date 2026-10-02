@@ -217,12 +217,167 @@ button, input, select, textarea {
   width: calc(100% - var(--sidebar-width));
 }
 
+/* --- Fixed Dynamic Honeycomb Background Layer --- */
+.school-honeycomb-background {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background-color: #0b0f19;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.school-honeycomb-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.school-hex-cell {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  transform: translateZ(0);
+  pointer-events: none;
+}
+
+.school-hex-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  -webkit-clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background-color: #111726;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.school-hex-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  transform: translateZ(0);
+  will-change: opacity, transform;
+}
+
+.school-hex-img.active {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 1.5s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 2;
+}
+
+.school-hex-img.standby {
+  opacity: 0;
+  transform: scale(1.08);
+  transition: opacity 1.5s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+}
+
+.school-hex-img.preparing {
+  transition: none !important;
+  opacity: 0;
+  transform: scale(1.08);
+}
+
+.school-hex-img.fade-in {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.school-hex-img.fade-out {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.school-hex-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.12) 0%, rgba(0, 0, 0, 0.45) 100%);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.6);
+  z-index: 3;
+}
+
+/* Semi-transparent dark/light scrim for 100% high-contrast readability */
+.school-honeycomb-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  background: radial-gradient(circle at center, rgba(15, 23, 42, 0.72) 0%, rgba(10, 15, 26, 0.88) 100%);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  transition: background 0.3s ease;
+}
+
+body.light-theme .school-honeycomb-background {
+  background-color: #f1f5f9;
+}
+
+body.light-theme .school-honeycomb-scrim {
+  background: radial-gradient(circle at center, rgba(248, 250, 252, 0.75) 0%, rgba(241, 245, 249, 0.90) 100%);
+}
+
+/* Frosted glass enhancements for scrolling content */
+.landing-page section[style*="background:var(--bg-secondary)"] {
+  background: rgba(30, 41, 59, 0.65) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+body.light-theme .landing-page section[style*="background:var(--bg-secondary)"] {
+  background: rgba(255, 255, 255, 0.78) !important;
+}
+
+.landing-page footer[style*="background:var(--bg-secondary)"] {
+  background: rgba(15, 23, 42, 0.82) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+body.light-theme .landing-page footer[style*="background:var(--bg-secondary)"] {
+  background: rgba(255, 255, 255, 0.88) !important;
+}
+
+.hero-section {
+  position: relative;
+  z-index: 10;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+body.light-theme .hero-section {
+  text-shadow: 0 2px 8px rgba(255, 255, 255, 0.8);
+}
+
+.value-card, .admissions-box {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-card);
+}
+
 /* --- Public Landing Page styling --- */
 .landing-page {
   width: 100vw;
   min-height: 100vh;
-  background-color: var(--bg-primary);
-  z-index: 1000;
+  background-color: transparent;
+  z-index: 10;
   position: relative;
   display: flex;
   flex-direction: column;
