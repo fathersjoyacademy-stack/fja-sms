@@ -22,6 +22,15 @@ async function verify() {
   console.log('  Contains Bibinii Tech developer footer:', website.body.includes('Bibinii Tech'));
   console.log('  Contains Bibinii Tech phone +233 544 73 78 70:', website.body.includes('+233 544 73 78 70'));
   console.log('  Contains #school-honeycomb-bg:', website.body.includes('id="school-honeycomb-bg"'));
+  console.log('  Contains Leadership Subheading "Board":', website.body.includes('Board</h3>') || website.body.includes('>Board<'));
+  console.log('  Contains Leadership Subheading "Management Team":', website.body.includes('Management Team</h3>') || website.body.includes('>Management Team<'));
+  console.log('  Contains Mr. Shadrach Dampson (Board Chairman):', website.body.includes('Mr. Shadrach Dampson') && website.body.includes('Board Chairman'));
+  console.log('  Contains Mr. Ernest Brew Paintsil (Proprietor):', website.body.includes('Mr. Ernest Brew Paintsil') && website.body.includes('Proprietor'));
+  console.log('  Contains Mad. Abigail Sarfo (Head, Management):', website.body.includes('Mad. Abigail Sarfo') && website.body.includes('Head, Management'));
+  console.log('  Contains Mad. Delphina Kwarah (Supervisor):', website.body.includes('Mad. Delphina Kwarah'));
+
+  const leadershipPhoto = await fetchUrl('https://fja-sms.web.app/website/assets/leadership/shadrach-dampson.jpeg');
+  console.log('\nLeadership Photo Asset (/website/assets/leadership/shadrach-dampson.jpeg):', leadershipPhoto.status);
 
   const honeycomb = await fetchUrl('https://fja-sms.web.app/website/honeycomb.js');
   console.log('\nHoneycomb Script Status:', honeycomb.status);
@@ -44,7 +53,7 @@ async function verify() {
 
   const sw = await fetchUrl('https://fja-sms.web.app/portal/sw.js');
   console.log('\nService Worker Status:', sw.status);
-  console.log('  SW Version v43:', sw.body.includes('school-mgt-v43'));
+  console.log('  SW Version v44:', sw.body.includes('school-mgt-v44'));
 
   const api = await fetchUrl('https://fja-sms.web.app/portal/api.js');
   console.log('\nAPI Engine Status:', api.status);

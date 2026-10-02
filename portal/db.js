@@ -807,6 +807,44 @@ const db = {
           console.warn("Failed to load real gallery photos fallback:", err);
         }
       }
+
+      // Purge legacy mock leadership team and upgrade to real Board & Management
+      try {
+        const leadRec = await this.get("cms_content", "leadership_team");
+        if (leadRec && leadRec.value) {
+          const valStr = typeof leadRec.value === "string" ? leadRec.value : JSON.stringify(leadRec.value);
+          if (valStr.includes("Ebenezer K. Mensah") || valStr.includes("Comfort A. Appiah")) {
+            console.log("Upgrading legacy mock leadership team to real Board & Management...");
+            await this.putLocal("cms_content", {
+              content_key: "leadership_board",
+              value: JSON.stringify([
+                { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
+                { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
+                { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
+                { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
+                { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
+                { name: "Nana Appiah Otoo Kubi", role: "Member", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
+                { name: "Mr. Samuel Kwesi Afful", role: "Member", image: "./assets/leadership/samuel-kwesi-afful.jpeg" }
+              ]),
+              updated_at: new Date().toISOString()
+            });
+            await this.putLocal("cms_content", {
+              content_key: "leadership_management",
+              value: JSON.stringify([
+                { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+                { name: "Mad. Enid Freda Anku", role: "Head Teacher", image: "./assets/leadership/enid-freda-anku.jpeg" },
+                { name: "Nana Appiah Otoo Kubi", role: "Asst. Head Teacher", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
+                { name: "Mr. Robert Fiifi Amoah", role: "Accountant", image: "./assets/leadership/robert-fiifi-amoah.jpeg" },
+                { name: "Mad. Theresa Boako", role: "Administrator", image: "./assets/leadership/theresa-boako.jpeg" },
+                { name: "Mad. Mabel Quintin-Cofie", role: "Sectional Head - JHS", image: "./assets/leadership/mabel-quintin-cofie.jpeg" },
+                { name: "Mr. Kingsley Appiah", role: "Sectional Head - Primary", image: "./assets/leadership/kingsley-appiah.jpeg" },
+                { name: "Mad. Delphina Kwarah", role: "Supervisor & Sectional Head - Pre School", image: "./assets/leadership/delphina-kwarah.jpeg" }
+              ]),
+              updated_at: new Date().toISOString()
+            });
+          }
+        }
+      } catch (lErr) {}
     } catch (e) {
       console.warn("purgeLegacySampleCMSData error:", e);
     }
@@ -1385,11 +1423,28 @@ async function seedMockData() {
       value: JSON.stringify([])
     },
     {
-      content_key: "leadership_team",
+      content_key: "leadership_board",
       value: JSON.stringify([
-        { name: "Mr. Ebenezer K. Mensah", role: "Proprietor & Director", image: "" },
-        { name: "Mrs. Comfort A. Appiah", role: "Head Teacher", image: "" },
-        { name: "John K. Larbi", role: "Administration & Accounts", image: "" }
+        { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
+        { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
+        { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
+        { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
+        { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
+        { name: "Nana Appiah Otoo Kubi", role: "Member", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
+        { name: "Mr. Samuel Kwesi Afful", role: "Member", image: "./assets/leadership/samuel-kwesi-afful.jpeg" }
+      ])
+    },
+    {
+      content_key: "leadership_management",
+      value: JSON.stringify([
+        { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+        { name: "Mad. Enid Freda Anku", role: "Head Teacher", image: "./assets/leadership/enid-freda-anku.jpeg" },
+        { name: "Nana Appiah Otoo Kubi", role: "Asst. Head Teacher", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
+        { name: "Mr. Robert Fiifi Amoah", role: "Accountant", image: "./assets/leadership/robert-fiifi-amoah.jpeg" },
+        { name: "Mad. Theresa Boako", role: "Administrator", image: "./assets/leadership/theresa-boako.jpeg" },
+        { name: "Mad. Mabel Quintin-Cofie", role: "Sectional Head - JHS", image: "./assets/leadership/mabel-quintin-cofie.jpeg" },
+        { name: "Mr. Kingsley Appiah", role: "Sectional Head - Primary", image: "./assets/leadership/kingsley-appiah.jpeg" },
+        { name: "Mad. Delphina Kwarah", role: "Supervisor & Sectional Head - Pre School", image: "./assets/leadership/delphina-kwarah.jpeg" }
       ])
     },
     {

@@ -256,20 +256,65 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-    // Leadership Team
-    const leadershipKey = await window.db.get("cms_content", "leadership_team");
-    if (leadershipKey) {
-      const team = JSON.parse(leadershipKey.value);
-      const container = document.getElementById("cms-leadership-container");
-      container.innerHTML = team.map(member => `
-        <div class="value-card" style="text-align:center;">
-          <div style="width:70px; height:70px; border-radius:50%; background:var(--accent-primary); display:flex; align-items:center; justify-content:center; margin:0 auto 1rem; color:white; font-size:1.5rem; font-weight:bold;">
-            ${member.name.split(" ").pop().substring(0, 1)}
-          </div>
-          <h4 style="margin-bottom:0.25rem; text-align:center;">${member.name}</h4>
-          <span style="font-size:0.8rem; color:var(--accent-secondary); font-weight:700;">${member.role}</span>
+    // Leadership Team (Board & Management Team)
+    const DEFAULT_BOARD = [
+      { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
+      { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
+      { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
+      { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
+      { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
+      { name: "Nana Appiah Otoo Kubi", role: "Member", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
+      { name: "Mr. Samuel Kwesi Afful", role: "Member", image: "./assets/leadership/samuel-kwesi-afful.jpeg" }
+    ];
+
+    const DEFAULT_MANAGEMENT = [
+      { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+      { name: "Mad. Enid Freda Anku", role: "Head Teacher", image: "./assets/leadership/enid-freda-anku.jpeg" },
+      { name: "Nana Appiah Otoo Kubi", role: "Asst. Head Teacher", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
+      { name: "Mr. Robert Fiifi Amoah", role: "Accountant", image: "./assets/leadership/robert-fiifi-amoah.jpeg" },
+      { name: "Mad. Theresa Boako", role: "Administrator", image: "./assets/leadership/theresa-boako.jpeg" },
+      { name: "Mad. Mabel Quintin-Cofie", role: "Sectional Head - JHS", image: "./assets/leadership/mabel-quintin-cofie.jpeg" },
+      { name: "Mr. Kingsley Appiah", role: "Sectional Head - Primary", image: "./assets/leadership/kingsley-appiah.jpeg" },
+      { name: "Mad. Delphina Kwarah", role: "Supervisor & Sectional Head - Pre School", image: "./assets/leadership/delphina-kwarah.jpeg" }
+    ];
+
+    const boardKey = await window.db.get("cms_content", "leadership_board");
+    const mgmtKey = await window.db.get("cms_content", "leadership_management");
+
+    let boardList = DEFAULT_BOARD;
+    if (boardKey && boardKey.value) {
+      try {
+        const parsed = JSON.parse(boardKey.value);
+        if (Array.isArray(parsed) && parsed.length > 0) boardList = parsed;
+      } catch (e) {}
+    }
+
+    let managementList = DEFAULT_MANAGEMENT;
+    if (mgmtKey && mgmtKey.value) {
+      try {
+        const parsed = JSON.parse(mgmtKey.value);
+        if (Array.isArray(parsed) && parsed.length > 0) managementList = parsed;
+      } catch (e) {}
+    }
+
+    const renderLeaderCard = (member) => `
+      <div class="leader-card">
+        <div class="leader-avatar-frame">
+          <img src="${member.image}" alt="${member.name}" class="leader-avatar-img" loading="lazy" onerror="this.onerror=null; this.src='./assets/logo.png';">
         </div>
-      `).join("");
+        <h4 class="leader-name">${member.name}</h4>
+        <div class="leader-role">${member.role}</div>
+      </div>
+    `;
+
+    const boardContainer = document.getElementById("cms-leadership-board-container");
+    if (boardContainer) {
+      boardContainer.innerHTML = boardList.map(renderLeaderCard).join("");
+    }
+
+    const mgmtContainer = document.getElementById("cms-leadership-management-container");
+    if (mgmtContainer) {
+      mgmtContainer.innerHTML = managementList.map(renderLeaderCard).join("");
     }
 
     // Render Academic Calendar & Events on the website (Vertical & Center Aligned)
