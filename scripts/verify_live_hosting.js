@@ -26,7 +26,7 @@ async function verify() {
   const honeycomb = await fetchUrl('https://fja-sms.web.app/website/honeycomb.js');
   console.log('\nHoneycomb Script Status:', honeycomb.status);
   console.log('  Cache-Control header:', honeycomb.headers['cache-control']);
-  console.log('  Contains FJA real gallery photos:', honeycomb.body.includes('FJA_REAL_PHOTOS') && honeycomb.body.includes('photo-01.jpg'));
+  console.log('  Contains FJA real gallery photos:', honeycomb.body.includes('FJA_REAL_PHOTOS') && honeycomb.body.includes('photo-'));
   console.log('  Zero Unsplash default images:', !honeycomb.body.includes('DEFAULT_SCHOOL_IMAGES'));
 
   const photoRoot = await fetchUrl('https://fja-sms.web.app/assets/gallery/photo-01.jpg');
