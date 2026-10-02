@@ -435,18 +435,34 @@ async function renderLandingCMS() {
 
     if (!gallery || !Array.isArray(gallery) || gallery.length === 0 || isMockGallery) {
       try {
-        const resp = await fetch("./assets/gallery-data.json");
-        if (resp && resp.ok) {
-          const fetched = await resp.json();
-          if (Array.isArray(fetched) && fetched.length > 0) {
-            gallery = fetched;
-            if (window.db && typeof window.db.putLocal === "function") {
-              await window.db.putLocal("cms_content", {
-                content_key: "gallery_images",
-                value: JSON.stringify(gallery),
-                updated_at: new Date().toISOString()
-              });
+        const candidatePaths = [
+          "./assets/gallery-data.json",
+          "/portal/assets/gallery-data.json",
+          "/website/assets/gallery-data.json",
+          "/assets/gallery-data.json",
+          "../portal/assets/gallery-data.json"
+        ];
+        let fetched = null;
+        for (const p of candidatePaths) {
+          try {
+            const resp = await fetch(p);
+            if (resp && resp.ok) {
+              const data = await resp.json();
+              if (Array.isArray(data) && data.length > 0) {
+                fetched = data;
+                break;
+              }
             }
+          } catch (_) {}
+        }
+        if (fetched) {
+          gallery = fetched;
+          if (window.db && typeof window.db.putLocal === "function") {
+            await window.db.putLocal("cms_content", {
+              content_key: "gallery_images",
+              value: JSON.stringify(gallery),
+              updated_at: new Date().toISOString()
+            });
           }
         }
       } catch (e) {}

@@ -1,4 +1,4 @@
-const CACHE_NAME = "school-mgt-v42";
+const CACHE_NAME = "school-mgt-v43";
 const applicationServerPublicKey = "BAtYvIhzrg3wFs8S6Zt-G6MEbOyUNiZ8lkD5rtf__BWLVZFcraDmmBD4qN1knxkQLf_PRxhuJxnIoiXWfNRq7As";
 const ASSETS_TO_CACHE = [
   "./",
@@ -9,8 +9,7 @@ const ASSETS_TO_CACHE = [
   "./api.js",
   "./app.js",
   "./manifest.json",
-  "./assets/logo.png",
-  "./assets/gallery-data.json"
+  "./assets/logo.png"
 ];
 
 // Install Event - cache core shell assets

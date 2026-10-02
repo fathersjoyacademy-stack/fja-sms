@@ -6,39 +6,59 @@
  * Optimized for desktop (1920x1080) and mobile (1080x1920) with zero scroll lag.
  */
 
-// Dynamic preloaded real gallery photos from static manifest or indexedDB
-let REAL_GALLERY_IMAGES = [];
+// Dynamic preloaded real gallery photos of Father's Joy Academy (Ghana Day, Graduation, Lab, Church, Career Day)
+const FJA_REAL_PHOTOS = Array.from({ length: 50 }, (_, i) => {
+  const num = String(i + 1).padStart(2, '0');
+  return `./assets/gallery/photo-${num}.jpg`;
+});
+
+let REAL_GALLERY_IMAGES = [...FJA_REAL_PHOTOS];
 
 async function fetchRealGalleryImages() {
-  if (REAL_GALLERY_IMAGES.length > 0) return REAL_GALLERY_IMAGES;
   try {
     if (window.db && typeof window.db.get === "function") {
       const gKey = await window.db.get("cms_content", "gallery_images");
       if (gKey && gKey.value) {
         const parsed = JSON.parse(gKey.value);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          REAL_GALLERY_IMAGES = parsed.map(item => item.url).filter(Boolean);
-          return REAL_GALLERY_IMAGES;
+          const cmsUrls = parsed.map(item => item.url).filter(Boolean);
+          if (cmsUrls.length > 0) {
+            REAL_GALLERY_IMAGES = cmsUrls;
+            return REAL_GALLERY_IMAGES;
+          }
         }
       }
     }
   } catch (e) {}
 
-  try {
-    const resp = await fetch("./assets/gallery-data.json");
-    if (resp.ok) {
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
-        REAL_GALLERY_IMAGES = data.map(item => item.url).filter(Boolean);
-        return REAL_GALLERY_IMAGES;
+  const candidatePaths = [
+    "./assets/gallery-data.json",
+    "/website/assets/gallery-data.json",
+    "/assets/gallery-data.json",
+    "../website/assets/gallery-data.json",
+    "assets/gallery-data.json"
+  ];
+
+  for (const p of candidatePaths) {
+    try {
+      const resp = await fetch(p);
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const urls = data.map(item => item.url).filter(Boolean);
+          if (urls.length > 0) {
+            REAL_GALLERY_IMAGES = urls;
+            return REAL_GALLERY_IMAGES;
+          }
+        }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
 
   return REAL_GALLERY_IMAGES;
 }
 
-// Pre-fetch immediately in background on script evaluation
+// Pre-fetch immediately in background on script evaluation to hydrate any uploaded CMS photos
 fetchRealGalleryImages().then(imgs => {
   if (imgs && imgs.length > 0 && window.schoolHoneycomb) {
     window.schoolHoneycomb.setImages(imgs);
@@ -54,7 +74,7 @@ class SchoolHoneycombEngine {
       fadeDuration: 1500,     // Smooth CSS transition time (ms)
       intervalSpeed: 1400,    // Time between transition ticks
       concurrentFades: 2,     // Max cells fading concurrently
-      images: REAL_GALLERY_IMAGES.length > 0 ? [...REAL_GALLERY_IMAGES] : []
+      images: REAL_GALLERY_IMAGES.length > 0 ? [...REAL_GALLERY_IMAGES] : [...FJA_REAL_PHOTOS]
     }, options);
 
     this.cells = [];
@@ -67,18 +87,19 @@ class SchoolHoneycombEngine {
     this.init();
   }
 
-  async init() {
-    if (this.options.images.length === 0) {
-      const imgs = await fetchRealGalleryImages();
-      if (imgs && imgs.length > 0) {
-        this.options.images = [...imgs];
-      }
-    }
+  init() {
     this.preloadBatch(this.options.images.slice(0, 15));
     this.setupResizeObserver();
     this.setupVisibilityListener();
     this.rebuildGrid();
     this.startScheduler();
+
+    // Hydrate CMS uploaded gallery photos if available
+    fetchRealGalleryImages().then(imgs => {
+      if (imgs && imgs.length > 0) {
+        this.setImages(imgs);
+      }
+    }).catch(() => {});
   }
 
   setImages(newImages) {
