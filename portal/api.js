@@ -262,12 +262,7 @@ const api = {
 
       // Check if Firebase is configured
       if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
-        try {
-          const authEmail = `${user.uid}@fathersjoy.com`;
-          const authResult = await firebase.auth().signInWithEmailAndPassword(authEmail, password);
-          const firebaseUser = authResult.user;
-          console.log("Firebase Auth sign-in successful:", firebaseUser.uid);
-        } catch (authErr) {
+        try { const authEmail = `${user.uid}@fathersjoy.com`; const currentAnon = firebase.auth().currentUser; if (currentAnon && currentAnon.isAnonymous) { try { await currentAnon.delete(); } catch(e) {} } const authResult = await firebase.auth().signInWithEmailAndPassword(authEmail, password); const firebaseUser = authResult.user; console.log("Firebase Auth sign-in successful:", firebaseUser.uid); } catch (authErr) {
           // Auto-provision user in Firebase Auth if correct password entered locally
           if (isValidLocally) {
             try {
@@ -2529,3 +2524,4 @@ const api = {
 };
 
 window.api = api;
+

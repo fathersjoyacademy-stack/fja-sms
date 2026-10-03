@@ -5,7 +5,55 @@ const DB_VERSION = 13;
 let dbInstance = null;
 
 // Clean-slate synchronization barrier (Forces client browsers to wipe stale demo IndexedDB & sessions)
-const CLEAN_SLATE_EPOCH = "2026-10-02-clean-slate-v3";
+// WARNING: bumping this empties every client's local DB. Seeds are local-only (see SEED_TIMESTAMP), so this
+// no longer overwrites cloud data, but it still forces a full re-download on every device.
+const CLEAN_SLATE_EPOCH = "2026-10-03-clean-slate-v5";
+
+// Read-only mode: the public website sets `window.FJA_READ_ONLY = true` before loading this file.
+// Visitors are signed in anonymously (which Firestore rules treat as authenticated), so in this mode the
+// client never seeds, migrates, heals or otherwise writes to Firestore, except for the public admissions
+// intake collections below.
+const DB_READ_ONLY = typeof window !== "undefined" && window.FJA_READ_ONLY === true;
+const READ_ONLY_CLOUD_WRITABLE_STORES = ["users", "profiles", "notifications"];
+
+function canWriteToCloud(storeName) {
+  return !DB_READ_ONLY || READ_ONLY_CLOUD_WRITABLE_STORES.includes(storeName);
+}
+
+// Seed/default records are stored locally only and carry an epoch timestamp, so any real cloud record
+// always wins conflict resolution. Seeds must NEVER be pushed to Firestore.
+const SEED_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+
+// Legacy demo content identifiers. Match on exact IDs/titles only: substring matching (e.g. "news-1")
+// previously matched every real announcement id ("news-" + Date.now() => "news-17...").
+const LEGACY_NEWS_IDS = ["news-1", "news-2", "news-3"];
+const LEGACY_NEWS_TITLES = ["New E-Library Portal Launched", "Upcoming PTA General Meeting", "Inter-Houses Athletics Competition"];
+const LEGACY_EVENT_IDS = ["ev-term1", "ev-term2", "ev-term3", "ev-pta", "ev-midterm", "ev-exam"];
+const LEGACY_ALBUM_IDS = ["alb-academics", "alb-sports", "alb-culture"];
+
+function parseJsonArray(value) {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+function isLegacyNewsItem(item) {
+  return !!item && (LEGACY_NEWS_IDS.includes(item.id) || LEGACY_NEWS_TITLES.includes(item.title));
+}
+function isLegacyCalendarEvent(ev) {
+  return !!ev && LEGACY_EVENT_IDS.includes(ev.id);
+}
+function isLegacyAlbum(album) {
+  return !!album && LEGACY_ALBUM_IDS.includes(album.id);
+}
+function isLegacyGalleryPhoto(photo) {
+  return !!photo && (
+    (typeof photo.id === "string" && photo.id.startsWith("img_demo_")) ||
+    (typeof photo.url === "string" && photo.url.startsWith("data:image/svg+xml"))
+  );
+}
 
 async function checkCleanSlateEpoch() {
   if (typeof localStorage !== "undefined" && localStorage.getItem("fja_clean_slate_epoch") !== CLEAN_SLATE_EPOCH) {
@@ -282,6 +330,7 @@ async function ensureFirebaseAuth() {
 const GALLERY_CHUNK_SIZE = 8; // 8 photos per chunk (~650KB), well below 1,048,576 bytes
 
 async function syncGalleryImagesToFirestore(obj) {
+  if (DB_READ_ONLY) return;
   if (typeof firebase === "undefined" || !firebase.firestore) return;
   await ensureFirebaseAuth();
   const firestore = firebase.firestore();
@@ -540,10 +589,36 @@ const db = {
     });
   },
 
+  // Insert a default/seed record locally ONLY if no record with that key exists (atomic IndexedDB add).
+  // Seeds get an epoch timestamp + is_seed flag so any real cloud record wins, and are never pushed to Firestore.
+  seedLocal(storeName, obj) {
+    const record = { ...obj, updated_at: SEED_TIMESTAMP, synced: true, is_seed: true };
+    if (!record.created_at) record.created_at = SEED_TIMESTAMP;
+    return initDB().then((database) => {
+      return new Promise((resolve, reject) => {
+        const transaction = database.transaction(storeName, "readwrite");
+        const request = transaction.objectStore(storeName).add(record);
+        request.onsuccess = () => resolve(true);
+        request.onerror = (e) => {
+          if (request.error && request.error.name === "ConstraintError") {
+            // Record already exists (real data) - keep it untouched
+            e.preventDefault();
+            resolve(false);
+          } else {
+            reject(request.error);
+          }
+        };
+      });
+    });
+  },
+
   // Save/Update record globally (IndexedDB + Cloud Firestore)
   async put(storeName, obj) {
     const isOnline = navigator.onLine;
-    obj.synced = isOnline;
+    const cloudWritable = canWriteToCloud(storeName);
+    obj.synced = cloudWritable ? isOnline : true;
+    // A real user save promotes a seed record into real data
+    delete obj.is_seed;
     if (!obj._preserve_updated_at) {
       obj.updated_at = new Date().toISOString();
     } else {
@@ -554,7 +629,7 @@ const db = {
     }
     
     const res = await this.putLocal(storeName, obj);
-    if (isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+    if (cloudWritable && isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
       try {
         const docId = this.getDocId(storeName, obj);
         if (docId) {
@@ -584,7 +659,7 @@ const db = {
         const store = transaction.objectStore(storeName);
         const request = store.add(obj);
         request.onsuccess = () => {
-          if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+          if (canWriteToCloud(storeName) && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
             try {
               const docId = this.getDocId(storeName, obj);
               if (docId) {
@@ -617,7 +692,7 @@ const db = {
   // Delete record globally
   delete(storeName, key) {
     return this.deleteLocal(storeName, key).then((res) => {
-      if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+      if (canWriteToCloud(storeName) && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
         try {
           firebase.firestore().collection(storeName).doc(key).delete();
         } catch (err) {
@@ -656,10 +731,12 @@ const db = {
     });
   },
 
-  // Purge legacy sample/demo CMS announcements and SVG galleries from local IndexedDB
+  // Purge legacy sample/demo CMS content from the LOCAL IndexedDB only.
+  // Never writes to Firestore and never re-stamps updated_at, so a stale local copy can't overwrite newer cloud data.
+  // Incoming cloud documents are cleaned separately by sanitizeIncomingDoc().
   async purgeLegacySampleCMSData() {
     try {
-      // 1. Purge legacy sample albums
+      // 1. Purge legacy sample albums (exact id match only)
       const albumsRec = await this.get("cms_content", "gallery_albums");
       const REAL_ALBUMS = [
         { id: "alb-ghana", name: "Ghana Day Celebration" },
@@ -668,105 +745,57 @@ const db = {
         { id: "alb-career", name: "Career Day" },
         { id: "alb-lab", name: "Lab Session" }
       ];
-      if (albumsRec && albumsRec.value) {
-        const valStr = typeof albumsRec.value === "string" ? albumsRec.value : JSON.stringify(albumsRec.value);
-        if (valStr.includes("alb-academics") || valStr.includes("Digital Coding Lab") || valStr.includes("alb-sports") || valStr.includes("alb-culture")) {
-          console.log("Purging legacy sample albums from IndexedDB...");
-          await this.putLocal("cms_content", {
-            content_key: "gallery_albums",
-            value: JSON.stringify(REAL_ALBUMS),
-            updated_at: new Date().toISOString()
-          });
+      if (albumsRec) {
+        const albums = parseJsonArray(albumsRec.value);
+        if (albums && albums.some(isLegacyAlbum)) {
+          console.log("Purging legacy sample albums from local IndexedDB...");
+          const cleanAlbums = albums.filter(a => !isLegacyAlbum(a));
+          albumsRec.value = JSON.stringify(cleanAlbums.length > 0 ? cleanAlbums : REAL_ALBUMS);
+          await this.putLocal("cms_content", albumsRec);
         }
       }
 
-      // 2. Purge legacy sample announcements
+      // 2. Purge legacy sample announcements (exact id/title match only)
       const newsRec = await this.get("cms_content", "news_feed");
-      if (newsRec && newsRec.value) {
-        const valStr = typeof newsRec.value === "string" ? newsRec.value : JSON.stringify(newsRec.value);
-        if (
-          valStr.includes("news-1") ||
-          valStr.includes("New E-Library Portal Launched") ||
-          valStr.includes("Upcoming PTA General Meeting") ||
-          valStr.includes("Inter-Houses Athletics Competition")
-        ) {
-          console.log("Purging legacy sample announcements from IndexedDB and Cloud Firestore...");
-          let cleanNews = [];
-          try {
-            const parsed = JSON.parse(newsRec.value);
-            if (Array.isArray(parsed)) {
-              cleanNews = parsed.filter(item =>
-                item.id !== "news-1" &&
-                item.id !== "news-2" &&
-                item.id !== "news-3" &&
-                item.title !== "New E-Library Portal Launched" &&
-                item.title !== "Upcoming PTA General Meeting" &&
-                item.title !== "Inter-Houses Athletics Competition"
-              );
-            }
-          } catch (e) {}
-          await this.put("cms_content", {
-            content_key: "news_feed",
-            value: JSON.stringify(cleanNews),
-            updated_at: new Date().toISOString()
-          });
+      if (newsRec) {
+        const news = parseJsonArray(newsRec.value);
+        if (news && news.some(isLegacyNewsItem)) {
+          console.log("Purging legacy sample announcements from local IndexedDB...");
+          newsRec.value = JSON.stringify(news.filter(item => !isLegacyNewsItem(item)));
+          await this.putLocal("cms_content", newsRec);
         }
       }
 
-      // 2.5 Purge legacy sample calendar events (2025/2026 First Academic Term, etc)
+      // 2.5 Purge legacy sample calendar events (exact legacy ids only)
       const calRec = await this.get("academic_calendar", "main-calendar");
-      if (calRec && Array.isArray(calRec.events) && calRec.events.length > 0) {
-        const hasLegacyCal = calRec.events.some(e =>
-          e.id === "ev-term1" ||
-          e.id === "ev-term2" ||
-          e.id === "ev-term3" ||
-          e.id === "ev-pta" ||
-          e.id === "ev-midterm" ||
-          e.id === "ev-exam" ||
-          (e.name && e.name.includes("2025/2026"))
-        );
-        if (hasLegacyCal) {
-          console.log("Purging legacy sample calendar events from IndexedDB and Cloud Firestore...");
-          calRec.events = calRec.events.filter(e =>
-            e.id !== "ev-term1" &&
-            e.id !== "ev-term2" &&
-            e.id !== "ev-term3" &&
-            e.id !== "ev-pta" &&
-            e.id !== "ev-midterm" &&
-            e.id !== "ev-exam" &&
-            !(e.name && e.name.includes("2025/2026"))
-          );
-          calRec.updated_at = new Date().toISOString();
-          await this.put("academic_calendar", calRec);
-        }
+      if (calRec && Array.isArray(calRec.events) && calRec.events.some(isLegacyCalendarEvent)) {
+        console.log("Purging legacy sample calendar events from local IndexedDB...");
+        calRec.events = calRec.events.filter(e => !isLegacyCalendarEvent(e));
+        await this.putLocal("academic_calendar", calRec);
       }
 
-      // 3. Purge legacy sample gallery images & ensure real 50 photos are loaded
+      // 3. Purge legacy sample gallery images & provide a LOCAL display fallback when no real gallery exists.
+      // The fallback is stored as a seed (epoch timestamp) and is NEVER pushed to Firestore.
       const galleryRec = await this.get("cms_content", "gallery_images");
       let needsPhotoFallback = false;
-      if (galleryRec && galleryRec.value) {
-        const valStr = typeof galleryRec.value === "string" ? galleryRec.value : JSON.stringify(galleryRec.value);
-        if (
-          valStr.includes("img_demo_") ||
-          valStr.includes("data:image/svg+xml") ||
-          valStr.includes("Digital Coding Lab") ||
-          valStr.includes("Science Experiments Lab") ||
-          valStr.includes("Sports Grounds")
-        ) {
-          console.log("Purging legacy mock gallery images from IndexedDB...");
-          needsPhotoFallback = true;
-        } else {
-          try {
-            const arr = JSON.parse(galleryRec.value);
-            if (!Array.isArray(arr) || arr.length === 0) {
-              needsPhotoFallback = true;
-            }
-          } catch (e) {
+      if (!galleryRec) {
+        needsPhotoFallback = true;
+      } else {
+        const photos = parseJsonArray(galleryRec.value);
+        const isUntouchedSeed = getDocTimestamp(galleryRec) === 0;
+        if (photos && photos.some(isLegacyGalleryPhoto)) {
+          console.log("Purging legacy mock gallery images from local IndexedDB...");
+          const realPhotos = photos.filter(p => !isLegacyGalleryPhoto(p));
+          if (realPhotos.length > 0) {
+            galleryRec.value = JSON.stringify(realPhotos);
+            await this.putLocal("cms_content", galleryRec);
+          } else {
             needsPhotoFallback = true;
           }
+        } else if (isUntouchedSeed && (!photos || photos.length === 0)) {
+          // Only replace an empty placeholder seed; respect a real (deliberately emptied) cloud gallery
+          needsPhotoFallback = true;
         }
-      } else {
-        needsPhotoFallback = true;
       }
 
       if (needsPhotoFallback) {
@@ -792,16 +821,15 @@ const db = {
             } catch (fetchErr) {}
           }
           if (fetchedPhotos && fetchedPhotos.length > 0) {
-            const photoDoc = {
+            await this.putLocal("cms_content", {
               content_key: "gallery_images",
               value: JSON.stringify(fetchedPhotos),
-              updated_at: new Date().toISOString()
-            };
-            await this.putLocal("cms_content", photoDoc);
-            console.log(`IndexedDB seeded with ${fetchedPhotos.length} real photos from manifest.`);
-            if (typeof syncGalleryImagesToFirestore === "function" && navigator.onLine && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
-              syncGalleryImagesToFirestore(photoDoc).catch(e => console.warn("Background photo sync notice:", e));
-            }
+              updated_at: SEED_TIMESTAMP,
+              created_at: SEED_TIMESTAMP,
+              synced: true,
+              is_seed: true
+            });
+            console.log(`Local gallery fallback loaded with ${fetchedPhotos.length} photos from manifest (not synced to cloud).`);
           }
         } catch (err) {
           console.warn("Failed to load real gallery photos fallback:", err);
@@ -820,6 +848,7 @@ const db = {
               value: JSON.stringify([
                 { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
                 { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
+                { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
                 { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
                 { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
                 { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
@@ -977,7 +1006,7 @@ async function seedMockData() {
         { id: "soc-5", title: "Social Studies for Grade 5", author: "Mrs. A. Ofori", pages: 95, summary: "West African history, national resources, and citizenship.", group: "Social Studies" }
       ];
       for (const b of seedBooks) {
-        await db.put("elibrary_books", b);
+        await db.seedLocal("elibrary_books", b);
       }
     }
 
@@ -1041,7 +1070,7 @@ async function seedMockData() {
         }
       ];
       for (const t of seedStaffTasks) {
-        await db.put("staff_tasks", t);
+        await db.seedLocal("staff_tasks", t);
       }
     }
 
@@ -1079,7 +1108,7 @@ async function seedMockData() {
         exam_end: "2026-12-10",
         pta_date: "2026-10-17"
       };
-      await db.put("academic_calendar", seedCalendar);
+      await db.seedLocal("academic_calendar", seedCalendar);
     } else {
       // Ensure calendar is non-null and has academic_year without overriding custom term dates
       try {
@@ -1126,7 +1155,7 @@ async function seedMockData() {
         }
       ];
       for (const q of seedQuestionnaires) {
-        await db.put("questionnaires", q);
+        await db.seedLocal("questionnaires", q);
       }
     }
 
@@ -1155,7 +1184,7 @@ async function seedMockData() {
         }
       ];
       for (const g of seedGroups) {
-        await db.put("custom_recipient_groups", g);
+        await db.seedLocal("custom_recipient_groups", g);
       }
     }
 
@@ -1198,7 +1227,7 @@ async function seedMockData() {
         }
       ];
       for (const a of seedArchives) {
-        await db.put("broadcast_archives", a);
+        await db.seedLocal("broadcast_archives", a);
       }
     }
 
@@ -1340,7 +1369,7 @@ async function seedMockData() {
   ];
 
   for (const u of seedUsers) {
-    await db.put("users", u);
+    await db.seedLocal("users", u);
   }
 
   // --- Seed Staff Profiles ---
@@ -1358,7 +1387,7 @@ async function seedMockData() {
   ];
 
   for (const p of seedProfiles) {
-    await db.put("profiles", p);
+    await db.seedLocal("profiles", p);
   }
 
   // --- Seed Classes (Clean Slate - No Teachers Assigned Yet) ---
@@ -1380,7 +1409,7 @@ async function seedMockData() {
   ];
 
   for (const c of seedClasses) {
-    await db.put("classes", c);
+    await db.seedLocal("classes", c);
   }
 
   // --- Seed CMS Content for Public Landing Page ---
@@ -1427,6 +1456,7 @@ async function seedMockData() {
       value: JSON.stringify([
         { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
         { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
+        { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
         { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
         { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
         { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
@@ -1462,11 +1492,7 @@ async function seedMockData() {
   for (const c of seedCMS) {
     const existing = await db.get("cms_content", c.content_key);
     if (!existing) {
-      await db.putLocal("cms_content", {
-        ...c,
-        updated_at: "1970-01-01T00:00:00.000Z",
-        created_at: "1970-01-01T00:00:00.000Z"
-      });
+      await db.seedLocal("cms_content", c);
     }
   }
 
@@ -1484,7 +1510,7 @@ async function seedMockData() {
   for (const s of seedSubjects) {
     const existing = await db.get("subjects", s.subject_id);
     if (!existing) {
-      await db.put("subjects", s);
+      await db.seedLocal("subjects", s);
     }
   }
 
@@ -1645,9 +1671,7 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
 }
 
 // Sanitize incoming Firestore documents to scrub legacy sample announcements and events
-function sanitizeIncomingDoc(storeName, docId, docData) {
-  if (!docData) return docData;
-  if (storeName === "cms_content" && docId === "news_feed" && docData.value) {
+function sanitizeIncomingDoc(storeName, docId, docData) { if (!docData) return docData; if (storeName === "users") { const isMe = window.currentUser && window.currentUser.user_id === docData.user_id; if (!isMe) { delete docData.password_hash; } } if (storeName === "cms_content" && docId === "news_feed" && docData.value) {
     try {
       let news = typeof docData.value === "string" ? JSON.parse(docData.value) : docData.value;
       if (Array.isArray(news)) {
@@ -1678,13 +1702,13 @@ function sanitizeIncomingDoc(storeName, docId, docData) {
   return docData;
 }
 
-async function startFirestoreSync() {
+async function startFirestoreSync(specificStores = null) {
   if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) {
     console.log("Firebase not configured - running in local-only Mode.");
     return;
   }
 
-  console.log("Firebase configured. Initializing real-time Firestore sync...");
+  console.log("Firebase configured. Initializing Firestore sync for requested stores...");
   try {
     if (firebase.apps.length === 0) {
       firebase.initializeApp(window.firebaseConfig);
@@ -1692,7 +1716,15 @@ async function startFirestoreSync() {
     await ensureFirebaseAuth();
     const firestore = firebase.firestore();
 
-    STORES_TO_SYNC.forEach(storeName => {
+    const storesToProcess = specificStores || STORES_TO_SYNC;
+    storesToProcess.forEach(storeName => {
+      if (DB_READ_ONLY) {
+        const PUBLIC_STORES = ["cms_content", "academic_calendar", "gallery_albums", "gallery_images"];
+        if (!PUBLIC_STORES.includes(storeName)) {
+          return;
+        }
+      }
+
       const lastSyncKey = `fja_last_sync_${storeName}`;
       const lastSync = localStorage.getItem(lastSyncKey);
 
@@ -1713,7 +1745,7 @@ async function startFirestoreSync() {
                   const remoteTime = getDocTimestamp(resolvedDocData);
                   if (localTime > remoteTime || localDoc.synced === false) {
                     try {
-                      if (navigator.onLine) {
+                      if (navigator.onLine && canWriteToCloud(storeName)) {
                         if (storeName === "cms_content" && docId === "gallery_images") {
                           await syncGalleryImagesToFirestore(localDoc);
                         } else {
@@ -1743,6 +1775,25 @@ async function startFirestoreSync() {
 
       // 1. Initial Cloud State Pull: Delta Query if lastSync exists, otherwise full pull & bootstrap
       let initialQuery = firestore.collection(storeName);
+
+      // --- RBAC FILTERING INJECTION ---
+      if (window.currentUser) {
+        const role = window.currentUser.role;
+        const myId = window.currentUser.user_id;
+        
+        if (role === "Student") {
+          if (["student_scores", "financial_transactions", "enrolments"].includes(storeName)) {
+            initialQuery = initialQuery.where("student_id", "==", myId);
+          } else if (storeName === "attendance") {
+            initialQuery = initialQuery.where("user_id", "==", myId);
+          } else if (["audit_logs", "staff_tasks", "bank_reconciliations", "data_change_requests", "pickup_guardians"].includes(storeName)) {
+            // Students have absolutely no business syncing these
+            return;
+          }
+        }
+      }
+      // --------------------------------
+
       if (lastSync) {
         initialQuery = initialQuery.where("updated_at", ">", lastSync);
       }
@@ -1757,10 +1808,12 @@ async function startFirestoreSync() {
                 const docId = db.getDocId(storeName, rec);
                 if (docId) {
                   if (!rec.updated_at) rec.updated_at = new Date().toISOString();
-                  if (storeName === "cms_content" && docId === "gallery_images") {
-                    await syncGalleryImagesToFirestore(rec);
-                  } else {
-                    await firestore.collection(storeName).doc(docId).set(rec);
+                  if (canWriteToCloud(storeName)) {
+                    if (storeName === "cms_content" && docId === "gallery_images") {
+                      await syncGalleryImagesToFirestore(rec);
+                    } else {
+                      await firestore.collection(storeName).doc(docId).set(rec);
+                    }
                   }
                 }
               }
@@ -1777,48 +1830,51 @@ async function startFirestoreSync() {
         firestore.collection(storeName).get().then(ingestBatch).catch(e => console.warn(`Full pull fallback for ${storeName} skipped:`, e));
       });
 
-      // 2. Real-time multi-device listener
-      firestore.collection(storeName).onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(async (change) => {
-          const docData = change.doc.data();
-          if (change.type === "added" || change.type === "modified") {
-            let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
-            const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
-            resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
-            const localDoc = await db.get(storeName, docId);
-            if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
-              // Local is newer or protected; heal cloud if local is strictly newer or pending
-              const localTime = getDocTimestamp(localDoc);
-              const remoteTime = getDocTimestamp(resolvedDocData);
-              if (localTime > remoteTime || localDoc.synced === false) {
-                try {
-                  if (navigator.onLine) {
-                    if (storeName === "cms_content" && docId === "gallery_images") {
-                      await syncGalleryImagesToFirestore(localDoc);
-                    } else {
-                      await firestore.collection(storeName).doc(docId).set(localDoc);
+      // 2. Real-time multi-device listener (Restricted to save Firebase read costs)
+      const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests"];
+      if (REALTIME_STORES.includes(storeName)) {
+        firestore.collection(storeName).onSnapshot(snapshot => {
+          snapshot.docChanges().forEach(async (change) => {
+            const docData = change.doc.data();
+            if (change.type === "added" || change.type === "modified") {
+              let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
+              const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
+              resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
+              const localDoc = await db.get(storeName, docId);
+              if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
+                // Local is newer or protected; heal cloud if local is strictly newer or pending
+                const localTime = getDocTimestamp(localDoc);
+                const remoteTime = getDocTimestamp(resolvedDocData);
+                if (localTime > remoteTime || localDoc.synced === false) {
+                  try {
+                    if (navigator.onLine && canWriteToCloud(storeName)) {
+                      if (storeName === "cms_content" && docId === "gallery_images") {
+                        await syncGalleryImagesToFirestore(localDoc);
+                      } else {
+                        await firestore.collection(storeName).doc(docId).set(localDoc);
+                      }
+                      localDoc.synced = true;
+                      await db.putLocal(storeName, localDoc);
                     }
-                    localDoc.synced = true;
-                    await db.putLocal(storeName, localDoc);
-                  }
-                } catch (e) {}
+                  } catch (e) {}
+                }
+                return;
               }
-              return;
+              await db.putLocal(storeName, resolvedDocData);
+              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
+              window.dispatchEvent(event);
+            } else if (change.type === "removed") {
+              const docId = change.doc.id;
+              await db.deleteLocal(storeName, docId);
+              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
+              window.dispatchEvent(event);
             }
-            await db.putLocal(storeName, resolvedDocData);
-            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
-            window.dispatchEvent(event);
-          } else if (change.type === "removed") {
-            const docId = change.doc.id;
-            await db.deleteLocal(storeName, docId);
-            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
-            window.dispatchEvent(event);
-          }
+          });
+          localStorage.setItem(lastSyncKey, new Date().toISOString());
+        }, err => {
+          console.warn(`Firestore snapshot sync for ${storeName}:`, err);
         });
-        localStorage.setItem(lastSyncKey, new Date().toISOString());
-      }, err => {
-        console.warn(`Firestore snapshot sync for ${storeName}:`, err);
-      });
+      }
     });
 
     // Real-time listener for gallery chunk updates across clients
@@ -1844,9 +1900,21 @@ async function startFirestoreSync() {
 
 // Automatically trigger seeding and sync on load
 seedMockData()
-  .then(() => startFirestoreSync())
+  .then(() => {
+    if (DB_READ_ONLY) {
+      // Public website only needs CMS data
+      return startFirestoreSync(["cms_content", "academic_calendar", "gallery_albums", "gallery_images"]);
+    } else {
+      // Portal needs auth data initially to allow users to login
+      return startFirestoreSync(["users", "profiles", "parent_profiles", "parent_student_relations"]);
+    }
+  })
   .catch(err => console.error("Initial seed/sync execution error:", err));
 
 // Export objects
 window.db = db;
 window.initDB = initDB;
+window.startFirestoreSync = startFirestoreSync;
+window.STORES_TO_SYNC = STORES_TO_SYNC;
+
+

@@ -260,6 +260,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const DEFAULT_BOARD = [
       { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
       { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
+      { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
       { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
       { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
       { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },

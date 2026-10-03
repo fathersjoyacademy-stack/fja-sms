@@ -230,9 +230,7 @@ function renderPaginationControls({ paginationContainerId, totalPages, currentPa
 // ==========================================
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js")
-      .then(reg => console.log("Service Worker registered successfully:", reg.scope))
-      .catch(err => console.error("Service Worker registration failed:", err));
+    navigator.serviceWorker.register("./sw.js").then(reg => { console.log("Service Worker registered successfully:", reg.scope); reg.addEventListener("updatefound", () => { const newWorker = reg.installing; if (newWorker) { newWorker.addEventListener("statechange", () => { if (newWorker.state === "installed" && navigator.serviceWorker.controller) { showToast("A new version of the portal is available! Please refresh the page.", "info"); } }); } }); }).catch(err => console.error("Service Worker registration failed:", err));
   });
 }
 
@@ -724,6 +722,11 @@ async function handleForcedReset(e) {
 async function enterDashboardPortal() {
   if (!currentUser) return;
   
+  // Start syncing private collections now that we are authenticated
+  if (window.startFirestoreSync && window.STORES_TO_SYNC) {
+     window.startFirestoreSync(window.STORES_TO_SYNC);
+  }
+
   // Ensure token and user are saved in storage
   if (currentToken) {
     localStorage.setItem("fja_session_token", currentToken);
@@ -5422,16 +5425,7 @@ async function renderBroadcastPanel(container) {
               const attendance = await window.db.getAll("attendance") || [];
               const authDataCache = { users, profiles, parentProfiles, parentRelations, transactions, attendance };
 
-              let successSent = 0;
-              for (const t of uniqueTargets) {
-                const ctx = await window.api.buildRecipientContext(t, authDataCache);
-                const parentPhone = t.phone || ctx.phone || "0240000000";
-                const personalizedMsg = window.api.resolveBroadcastTags(updatedMsg, ctx);
-                const res = await window.api.sendSMS(parentPhone, `[BROADCAST: ${reqObj.title}] ${personalizedMsg}`);
-                if (res && res.success) successSent++;
-              }
-
-              showToast(`Broadcast approved. Dispatched bulk SMS to ${successSent}/${uniqueTargets.length} parent contacts!`, "success");
+              showToast(`Broadcast approved. Dispatching bulk SMS to ${uniqueTargets.length} parent contacts in the background...`, "info"); (async () => { let successSent = 0; for (const t of uniqueTargets) { try { const ctx = await window.api.buildRecipientContext(t, authDataCache); const parentPhone = t.phone || ctx.phone || "0240000000"; const personalizedMsg = window.api.resolveBroadcastTags(updatedMsg, ctx); const res = await window.api.sendSMS(parentPhone, `[BROADCAST: ${reqObj.title}] ${personalizedMsg}`); if (res && res.success) successSent++; } catch (e) {} } showToast(`Background SMS dispatch complete. Sent: ${successSent}.`, "success"); })();
               loadPendingAuthorizations();
             }
           } catch (err) {
@@ -6897,21 +6891,7 @@ async function renderFeeLedger(container) {
           return;
         }
 
-        let count = 0;
-        for (const stud of targets) {
-          const txId = "t-invoice-gb-" + stud.user_id + "-" + Date.now();
-          await window.db.put("financial_transactions", {
-            transaction_id: txId,
-            student_id: stud.user_id,
-            type: "FEE_PAYMENT",
-            amount: amount,
-            payment_method: "N/A",
-            reference_no: "GB-" + Date.now().toString().substring(9) + "-" + stud.uid,
-            recorded_by: currentUser.user_id,
-            timestamp: new Date().toISOString()
-          });
-          count++;
-        }
+        const nowStr = new Date().toISOString(); const tStamp = Date.now(); const count = targets.length; await Promise.all(targets.map((stud, i) => window.db.put("financial_transactions", { transaction_id: "t-invoice-gb-" + stud.user_id + "-" + tStamp + "-" + i, student_id: stud.user_id, type: "FEE_PAYMENT", amount: amount, payment_method: "N/A", reference_no: "GB-" + tStamp.toString().substring(9) + "-" + stud.uid, recorded_by: currentUser.user_id, timestamp: nowStr })));
 
         showToast(`Group billing posted successfully to ${count} students!`, "success");
         document.getElementById("group-billing-modal").classList.add("portal-hidden");
@@ -6976,21 +6956,7 @@ async function renderFeeLedger(container) {
           return;
         }
 
-        let count = 0;
-        for (const stud of targets) {
-          const txId = "t-invoice-bulk-" + stud.user_id + "-" + Date.now();
-          await window.db.put("financial_transactions", {
-            transaction_id: txId,
-            student_id: stud.user_id,
-            type: "FEE_PAYMENT",
-            amount: amount,
-            payment_method: "N/A",
-            reference_no: ref + "-" + stud.uid,
-            recorded_by: currentUser.user_id,
-            timestamp: new Date().toISOString()
-          });
-          count++;
-        }
+        const nowStr = new Date().toISOString(); const tStamp = Date.now(); const count = targets.length; await Promise.all(targets.map((stud, i) => window.db.put("financial_transactions", { transaction_id: "t-invoice-bulk-" + stud.user_id + "-" + tStamp + "-" + i, student_id: stud.user_id, type: "FEE_PAYMENT", amount: amount, payment_method: "N/A", reference_no: ref + "-" + stud.uid, recorded_by: currentUser.user_id, timestamp: nowStr })));
 
         showToast(`Terminal fees of GH¢ ${amount.toFixed(2)} posted successfully to ${count} students!`, "success");
         document.getElementById("terminal-fees-modal").classList.add("portal-hidden");
@@ -16497,14 +16463,7 @@ async function renderBroadcastRequests(container) {
               const attendance = await window.db.getAll("attendance") || [];
               const authDataCache = { users, profiles, parentProfiles, parentRelations, transactions, attendance };
 
-              for (const t of targets) {
-                const ctx = await window.api.buildRecipientContext(t, authDataCache);
-                const parentPhone = t.phone || ctx.phone || "0240000000";
-                const personalizedMsg = window.api.resolveBroadcastTags(reqObj.message, ctx);
-                await window.api.sendSMS(parentPhone, `[BROADCAST: ${reqObj.title}] ${personalizedMsg}`);
-              }
-
-              showToast(`Broadcast approved. Dispatched bulk SMS to ${targets.length} parent contacts!`, "success");
+              showToast(`Broadcast approved. Dispatching bulk SMS to ${targets.length} parent contacts in the background...`, "info"); (async () => { let successSent = 0; for (const t of targets) { try { const ctx = await window.api.buildRecipientContext(t, authDataCache); const parentPhone = t.phone || ctx.phone || "0240000000"; const personalizedMsg = window.api.resolveBroadcastTags(reqObj.message, ctx); const res = await window.api.sendSMS(parentPhone, `[BROADCAST: ${reqObj.title}] ${personalizedMsg}`); if (res && res.success) successSent++; } catch (e) {} } showToast(`Background SMS dispatch complete. Sent: ${successSent}.`, "success"); })();
               loadAdminRequests();
             }
           });
@@ -17055,9 +17014,6 @@ async function renderAcademicCalendar(container) {
           net_days: 65
         }
       };
-      cal.calendar_id = "main-calendar";
-      cal.updated_at = new Date().toISOString();
-      await window.db.put("academic_calendar", cal);
     }
     const ct = cal.canonical_terms;
 
@@ -20722,3 +20678,8 @@ window.addEventListener("popstate", (e) => {
     }
   }
 });
+
+
+
+
+
