@@ -156,7 +156,10 @@ document.addEventListener("DOMContentLoaded", async () => {
             await window.db.putLocal("cms_content", {
               content_key: "gallery_images",
               value: JSON.stringify(gallery),
-              updated_at: new Date().toISOString()
+              updated_at: "1970-01-01T00:00:00.000Z",
+              created_at: "1970-01-01T00:00:00.000Z",
+              synced: true,
+              is_seed: true
             });
           }
         }
@@ -297,6 +300,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (Array.isArray(parsed) && parsed.length > 0) managementList = parsed;
       } catch (e) {}
     }
+
+    const normalizeLeader = (m) => {
+      if (m && m.name && m.name.includes("Abigail Sarfo")) {
+        return { ...m, role: "Proprietress" };
+      }
+      return m;
+    };
+    boardList = boardList.map(normalizeLeader);
+    managementList = managementList.map(normalizeLeader);
 
     const renderLeaderCard = (member) => `
       <div class="leader-card">

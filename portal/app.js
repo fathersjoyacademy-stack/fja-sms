@@ -4344,6 +4344,35 @@ async function renderWebsiteCMS(container) {
 
     renderCMSThumbnails();
 
+    // Fresh pull for CMS gallery albums and images from cloud Firestore to ensure cross-device visibility
+    if (navigator.onLine && window.isFirebaseConfigured && window.isFirebaseConfigured() && typeof firebase !== "undefined" && firebase.firestore) {
+      (async () => {
+        try {
+          const firestore = firebase.firestore();
+          const albumsDoc = await firestore.collection("cms_content").doc("gallery_albums").get();
+          if (albumsDoc.exists) {
+            const data = albumsDoc.data();
+            if (data && data.value) {
+              await window.db.putLocal("cms_content", data);
+            }
+          }
+          const galleryDoc = await firestore.collection("cms_content").doc("gallery_images").get();
+          if (galleryDoc.exists) {
+            let galleryData = galleryDoc.data();
+            if (typeof assembleFirestoreDoc === "function") {
+              galleryData = await assembleFirestoreDoc("cms_content", galleryData);
+            }
+            if (galleryData && galleryData.value) {
+              await window.db.putLocal("cms_content", galleryData);
+            }
+          }
+          await renderCMSThumbnails();
+        } catch (syncErr) {
+          console.warn("Website Manager direct cloud sync notice:", syncErr);
+        }
+      })();
+    }
+
     function compressImage(file, maxDimension = 800, quality = 0.65) {
       return new Promise((resolve) => {
         const reader = new FileReader();

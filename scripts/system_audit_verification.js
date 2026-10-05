@@ -156,7 +156,7 @@ recordTest('mobile', 'Full Scrollability with Bottom Clearance in Student Modal'
 // ----------------------------------------------------
 console.log('Auditing 8. Service Worker & Deployment...');
 const swJs = fs.readFileSync(path.join(PORTAL_DIR, 'sw.js'), 'utf8');
-const swVersionMatch = swJs.includes('school-mgt-v46') || swJs.includes('school-mgt-v45') || swJs.includes('school-mgt-v44') || swJs.includes('school-mgt-v43') || swJs.includes('school-mgt-v42') || swJs.includes('school-mgt-v41') || swJs.includes('school-mgt-v40') || swJs.includes('school-mgt-v39') || swJs.includes('school-mgt-v38') || swJs.includes('school-mgt-v37');
+const swVersionMatch = swJs.includes('school-mgt-v48') || swJs.includes('school-mgt-v47') || swJs.includes('school-mgt-v46') || swJs.includes('school-mgt-v45') || swJs.includes('school-mgt-v44') || swJs.includes('school-mgt-v43') || swJs.includes('school-mgt-v42') || swJs.includes('school-mgt-v41') || swJs.includes('school-mgt-v40') || swJs.includes('school-mgt-v39') || swJs.includes('school-mgt-v38') || swJs.includes('school-mgt-v37');
 recordTest('deployment', 'Service Worker Cache Version Bumped (v46)', swVersionMatch);
 
 const manifestExists = fs.existsSync(path.join(PORTAL_DIR, 'manifest.json'));

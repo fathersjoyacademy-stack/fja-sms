@@ -411,7 +411,7 @@ async function syncGalleryImagesToFirestore(obj) {
 // Assemble chunked Firestore documents transparently on client read
 async function assembleFirestoreDoc(storeName, docData) {
   if (storeName === "cms_content" && docData && (docData.content_key === "gallery_images" || docData.is_chunked)) {
-    if (docData.is_chunked && typeof firebase !== "undefined" && firebase.firestore) {
+    if ((docData.is_chunked || docData.content_key === "gallery_images") && typeof firebase !== "undefined" && firebase.firestore) {
       try {
         const firestore = firebase.firestore();
         const chunksSnapshot = await firestore.collection("cms_gallery_chunks").get();
@@ -432,6 +432,9 @@ async function assembleFirestoreDoc(storeName, docData) {
           });
           return {
             content_key: "gallery_images",
+            is_chunked: true,
+            chunk_count: chunks.length,
+            total_photos: allPhotos.length,
             value: JSON.stringify(allPhotos),
             updated_at: docData.updated_at || new Date().toISOString(),
             synced: true
@@ -724,7 +727,8 @@ const db = {
         { id: "alb-grad", name: "Graduation Ceremony" },
         { id: "alb-church", name: "Church Service" },
         { id: "alb-career", name: "Career Day" },
-        { id: "alb-lab", name: "Lab Session" }
+        { id: "alb-lab", name: "Lab Session" },
+        { id: "alb-quiz", name: "Quiz" }
       ];
       if (albumsRec) {
         const albums = parseJsonArray(albumsRec.value);
@@ -829,7 +833,7 @@ const db = {
               value: JSON.stringify([
                 { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
                 { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
-                { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+                { name: "Mad. Abigail Sarfo", role: "Proprietress", image: "./assets/leadership/abigail-sarfo.jpeg" },
                 { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
                 { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
                 { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
@@ -841,7 +845,7 @@ const db = {
             await this.putLocal("cms_content", {
               content_key: "leadership_management",
               value: JSON.stringify([
-                { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+                { name: "Mad. Abigail Sarfo", role: "Proprietress", image: "./assets/leadership/abigail-sarfo.jpeg" },
                 { name: "Mad. Enid Freda Anku", role: "Head Teacher", image: "./assets/leadership/enid-freda-anku.jpeg" },
                 { name: "Nana Appiah Otoo Kubi", role: "Asst. Head Teacher", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
                 { name: "Mr. Robert Fiifi Amoah", role: "Accountant", image: "./assets/leadership/robert-fiifi-amoah.jpeg" },
@@ -853,6 +857,17 @@ const db = {
               updated_at: new Date().toISOString()
             });
           }
+        }
+        // Auto-upgrade Mad. Abigail Sarfo's title to Proprietress across stored leadership
+        const boardRec = await this.get("cms_content", "leadership_board");
+        if (boardRec && boardRec.value && boardRec.value.includes("Head, Management")) {
+          boardRec.value = boardRec.value.replace(/"role":\s*"Head,\s*Management"/g, '"role":"Proprietress"');
+          await this.putLocal("cms_content", boardRec);
+        }
+        const mgmtRec = await this.get("cms_content", "leadership_management");
+        if (mgmtRec && mgmtRec.value && mgmtRec.value.includes("Head, Management")) {
+          mgmtRec.value = mgmtRec.value.replace(/"role":\s*"Head,\s*Management"/g, '"role":"Proprietress"');
+          await this.putLocal("cms_content", mgmtRec);
         }
       } catch (lErr) {}
     } catch (e) {
@@ -1437,7 +1452,7 @@ async function seedMockData() {
       value: JSON.stringify([
         { name: "Mr. Shadrach Dampson", role: "Board Chairman", image: "./assets/leadership/shadrach-dampson.jpeg" },
         { name: "Mr. Ernest Brew Paintsil", role: "Proprietor", image: "./assets/leadership/ernest-brew-paintsil.jpeg" },
-        { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+        { name: "Mad. Abigail Sarfo", role: "Proprietress", image: "./assets/leadership/abigail-sarfo.jpeg" },
         { name: "Mr. John Mensah", role: "SPP Chairman", image: "./assets/leadership/john-mensah.jpeg" },
         { name: "Ps. Emmanuel Nuakoh", role: "Member", image: "./assets/leadership/emmanuel-nuakoh.jpeg" },
         { name: "Mad. Yvonne Anonadaga Kwarah", role: "Member", image: "./assets/leadership/yvonne-anonadaga-kwarah.jpeg" },
@@ -1448,7 +1463,7 @@ async function seedMockData() {
     {
       content_key: "leadership_management",
       value: JSON.stringify([
-        { name: "Mad. Abigail Sarfo", role: "Head, Management", image: "./assets/leadership/abigail-sarfo.jpeg" },
+        { name: "Mad. Abigail Sarfo", role: "Proprietress", image: "./assets/leadership/abigail-sarfo.jpeg" },
         { name: "Mad. Enid Freda Anku", role: "Head Teacher", image: "./assets/leadership/enid-freda-anku.jpeg" },
         { name: "Nana Appiah Otoo Kubi", role: "Asst. Head Teacher", image: "./assets/leadership/nana-appiah-otoo-kubi.jpeg" },
         { name: "Mr. Robert Fiifi Amoah", role: "Accountant", image: "./assets/leadership/robert-fiifi-amoah.jpeg" },
@@ -1465,7 +1480,8 @@ async function seedMockData() {
         { id: "alb-grad", name: "Graduation Ceremony" },
         { id: "alb-church", name: "Church Service" },
         { id: "alb-career", name: "Career Day" },
-        { id: "alb-lab", name: "Lab Session" }
+        { id: "alb-lab", name: "Lab Session" },
+        { id: "alb-quiz", name: "Quiz" }
       ])
     }
   ];
@@ -1560,6 +1576,12 @@ function getDocTimestamp(doc) {
 function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
   if (!localDoc) return false;
   if (!remoteDoc) return true;
+
+  // Local seed/fallback records must never prevent real cloud data from syncing
+  const seedTimestamp = typeof SEED_TIMESTAMP !== "undefined" ? SEED_TIMESTAMP : "1970-01-01T00:00:00.000Z";
+  if (localDoc.is_seed === true || localDoc.updated_at === seedTimestamp || getDocTimestamp(localDoc) === 0) {
+    return false;
+  }
 
   // Never keep legacy sample demo announcements, SVG mock galleries, or mock albums over real cloud data
   if (storeName === "cms_content") {
@@ -1806,66 +1828,66 @@ async function startFirestoreSync(specificStores = null) {
       });
 
       // 2. Real-time multi-device listener (Restricted to save Firebase read costs)
-              const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests"];
-        if (REALTIME_STORES.includes(storeName)) {
-          let queries = [];
-          if (window.currentUser) {
-            const role = window.currentUser.role;
-            const myId = window.currentUser.user_id;
-            
-            if (storeName === "portal_messages") {
-               queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
-               queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
-            } else if (storeName === "notifications") {
-               queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
-               queries.push(firestore.collection(storeName).where("role", "==", role));
-               queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
-            } else if (storeName === "broadcast_requests" && (role === "Teacher" || role === "SectionalHead")) {
-               queries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
-            } else {
-               queries.push(firestore.collection(storeName));
-            }
+      const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests", "cms_content"];
+      if (REALTIME_STORES.includes(storeName)) {
+        let queries = [];
+        if (window.currentUser) {
+          const role = window.currentUser.role;
+          const myId = window.currentUser.user_id;
+          
+          if (storeName === "portal_messages") {
+             queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+             queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+          } else if (storeName === "notifications") {
+             queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+             queries.push(firestore.collection(storeName).where("role", "==", role));
+             queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+          } else if (storeName === "broadcast_requests" && (role === "Teacher" || role === "SectionalHead")) {
+             queries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
           } else {
-            queries.push(firestore.collection(storeName));
+             queries.push(firestore.collection(storeName));
           }
+        } else {
+          queries.push(firestore.collection(storeName));
+        }
 
-          queries.forEach(q => {
-            q.onSnapshot(snapshot => {
-          snapshot.docChanges().forEach(async (change) => {
-            const docData = change.doc.data();
-            if (change.type === "added" || change.type === "modified") {
-              let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
-              const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
-              resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
-              const localDoc = await db.get(storeName, docId);
-              if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
-                // Local is newer or protected; heal cloud if local is strictly newer or pending
-                const localTime = getDocTimestamp(localDoc);
-                const remoteTime = getDocTimestamp(resolvedDocData);
-                if (localTime > remoteTime || localDoc.synced === false) {
-                  try {
-                    if (navigator.onLine && canWriteToCloud(storeName)) {
-                      if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
-                    }
-                  } catch (e) {}
-                }
-                return;
+        queries.forEach(q => {
+          q.onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(async (change) => {
+          const docData = change.doc.data();
+          if (change.type === "added" || change.type === "modified") {
+            let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
+            const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
+            resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
+            const localDoc = await db.get(storeName, docId);
+            if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
+              // Local is newer or protected; heal cloud if local is strictly newer or pending
+              const localTime = getDocTimestamp(localDoc);
+              const remoteTime = getDocTimestamp(resolvedDocData);
+              if (localTime > remoteTime || localDoc.synced === false) {
+                try {
+                  if (navigator.onLine && canWriteToCloud(storeName)) {
+                    if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
+                  }
+                } catch (e) {}
               }
-              await db.putLocal(storeName, resolvedDocData);
-              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
-              window.dispatchEvent(event);
-            } else if (change.type === "removed") {
-              const docId = change.doc.id;
-              await db.deleteLocal(storeName, docId);
-              const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
-              window.dispatchEvent(event);
+              return;
             }
-          });
-          localStorage.setItem(lastSyncKey, new Date().toISOString());
-        }, err => {
-          console.warn(`Firestore snapshot sync for ${storeName}:`, err);
+            await db.putLocal(storeName, resolvedDocData);
+            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
+            window.dispatchEvent(event);
+          } else if (change.type === "removed") {
+            const docId = change.doc.id;
+            await db.deleteLocal(storeName, docId);
+            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
+            window.dispatchEvent(event);
+          }
         });
-          });
+        localStorage.setItem(lastSyncKey, new Date().toISOString());
+      }, err => {
+        console.warn(`Firestore snapshot sync for ${storeName}:`, err);
+      });
+        });
       }
     });
 
@@ -1874,7 +1896,7 @@ async function startFirestoreSync(specificStores = null) {
       firestore.collection("cms_gallery_chunks").onSnapshot(async (snapshot) => {
         if (!snapshot.empty) {
           const galleryMeta = await db.get("cms_content", "gallery_images");
-          const assembled = await assembleFirestoreDoc("cms_content", galleryMeta || { content_key: "gallery_images", is_chunked: true });
+          const assembled = await assembleFirestoreDoc("cms_content", { ...(galleryMeta || {}), content_key: "gallery_images", is_chunked: true });
           if (assembled && assembled.value) {
             await db.putLocal("cms_content", assembled);
             const event = new CustomEvent("dbSyncUpdate", { detail: { storeName: "cms_content", docData: assembled } });

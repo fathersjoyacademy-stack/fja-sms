@@ -26,7 +26,7 @@ async function verify() {
   console.log('  Contains Leadership Subheading "Management Team":', website.body.includes('Management Team</h3>') || website.body.includes('>Management Team<'));
   console.log('  Contains Mr. Shadrach Dampson (Board Chairman):', website.body.includes('Mr. Shadrach Dampson') && website.body.includes('Board Chairman'));
   console.log('  Contains Mr. Ernest Brew Paintsil (Proprietor):', website.body.includes('Mr. Ernest Brew Paintsil') && website.body.includes('Proprietor'));
-  console.log('  Contains Mad. Abigail Sarfo (Head, Management):', website.body.includes('Mad. Abigail Sarfo') && website.body.includes('Head, Management'));
+  console.log('  Contains Mad. Abigail Sarfo (Proprietress):', website.body.includes('Mad. Abigail Sarfo') && website.body.includes('Proprietress'));
   console.log('  Contains Mad. Delphina Kwarah (Supervisor):', website.body.includes('Mad. Delphina Kwarah'));
   console.log('  Contact Us card centered styling:', website.body.includes('text-align:center') || website.body.includes('text-align: center'));
 
@@ -47,6 +47,7 @@ async function verify() {
 
   const galleryJsonRoot = await fetchUrl('https://fja-sms.web.app/assets/gallery-data.json');
   console.log('Root gallery-data.json (/assets/gallery-data.json):', galleryJsonRoot.status);
+  console.log('  Contains Quiz album photos in gallery-data.json:', galleryJsonRoot.body.includes('"Quiz"'));
 
   const portal = await fetchUrl('https://fja-sms.web.app/portal/index.html');
   console.log('\nPortal Status:', portal.status);
@@ -54,7 +55,7 @@ async function verify() {
 
   const sw = await fetchUrl('https://fja-sms.web.app/portal/sw.js');
   console.log('\nService Worker Status:', sw.status);
-  console.log('  SW Version v46:', sw.body.includes('school-mgt-v46'));
+  console.log('  SW Version v48:', sw.body.includes('school-mgt-v48'));
 
   const api = await fetchUrl('https://fja-sms.web.app/portal/api.js');
   console.log('\nAPI Engine Status:', api.status);
