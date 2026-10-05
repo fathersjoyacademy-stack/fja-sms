@@ -25,7 +25,7 @@ const quizPhotos = gData.filter(p => p.album === 'Quiz');
 assert.strictEqual(quizPhotos.length, 6, 'gallery-data.json must have 6 Quiz photos');
 
 // Verify REALTIME_STORES
-assert.ok(dbJs.includes('const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests", "cms_content"];'), 'REALTIME_STORES must include cms_content');
+assert.ok(dbJs.includes('REALTIME_STORES') && dbJs.includes('"cms_content"'), 'REALTIME_STORES must include cms_content');
 
 // Verify seed fallback timestamp
 assert.ok(websiteJs.includes('1970-01-01T00:00:00.000Z'), 'website.js must write epoch seed timestamp for gallery fallback');

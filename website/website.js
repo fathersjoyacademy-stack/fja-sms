@@ -330,12 +330,47 @@ document.addEventListener("DOMContentLoaded", async () => {
       mgmtContainer.innerHTML = managementList.map(renderLeaderCard).join("");
     }
 
+    // Fresh pull for academic calendar from cloud Firestore to ensure multi-device synchronization
+    if (window.firebase && firebase.apps.length > 0) {
+      try {
+        const calSnap = await firebase.firestore().collection("academic_calendar").doc("main-calendar").get();
+        if (calSnap.exists) {
+          const remoteCal = calSnap.data();
+          const localCal = await window.db.get("academic_calendar", "main-calendar");
+          const keepLocal = typeof window.shouldKeepLocalDoc === "function" 
+            ? window.shouldKeepLocalDoc("academic_calendar", "main-calendar", localCal, remoteCal) 
+            : false;
+          if (!keepLocal) {
+            await window.db.putLocal("academic_calendar", remoteCal);
+          }
+        }
+      } catch (calErr) {
+        console.warn("Direct academic calendar cloud pull notice:", calErr);
+      }
+    }
+
     // Render Academic Calendar & Events on the website (Vertical & Center Aligned)
     const calendarKey = await window.db.get("academic_calendar", "main-calendar");
     const eventsContainer = document.getElementById("website-calendar-events-container");
     
     if (eventsContainer) {
       let events = (calendarKey && Array.isArray(calendarKey.events)) ? [...calendarKey.events] : [];
+
+      // Fallback synthesis from canonical terms or root dates if events list is empty
+      if (events.length === 0 && calendarKey) {
+        const acadYear = calendarKey.academic_year || (calendarKey.canonical_terms && calendarKey.canonical_terms.academic_year) || "2026/2027";
+        const ct = calendarKey.canonical_terms || {};
+        const t1Start = calendarKey.term1_start || (ct.term1 && ct.term1.start_date);
+        const t1End = calendarKey.term1_end || (ct.term1 && ct.term1.end_date);
+        const t2Start = calendarKey.term2_start || (ct.term2 && ct.term2.start_date);
+        const t2End = calendarKey.term2_end || (ct.term2 && ct.term2.end_date);
+        const t3Start = calendarKey.term3_start || (ct.term3 && ct.term3.start_date);
+        const t3End = calendarKey.term3_end || (ct.term3 && ct.term3.end_date);
+
+        if (t1Start) events.push({ name: `${acadYear} 1st Academic Term`, start_date: t1Start, end_date: t1End || t1Start });
+        if (t2Start) events.push({ name: `${acadYear} 2nd Academic Term`, start_date: t2Start, end_date: t2End || t2Start });
+        if (t3Start) events.push({ name: `${acadYear} 3rd Academic Term`, start_date: t3Start, end_date: t3End || t3Start });
+      }
 
       // Auto-arrange for the earliest start date to lead the list
       events.sort((a, b) => {

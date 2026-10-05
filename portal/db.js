@@ -1102,7 +1102,18 @@ async function seedMockData() {
         midterm_end: "2026-10-23",
         exam_start: "2026-12-01",
         exam_end: "2026-12-10",
-        pta_date: "2026-10-17"
+        pta_date: "2026-10-17",
+        canonical_terms: {
+          academic_year: "2026/2027",
+          term1: { start_date: "2026-09-08", end_date: "2026-12-17", midterm_start: "2026-10-19", midterm_end: "2026-10-23", public_holidays: 2, net_days: 70 },
+          term2: { start_date: "2027-01-05", end_date: "2027-03-25", midterm_start: "2027-02-15", midterm_end: "2027-02-19", public_holidays: 3, net_days: 55 },
+          term3: { start_date: "2027-04-20", end_date: "2027-07-22", midterm_start: "2027-06-07", midterm_end: "2027-06-11", public_holidays: 2, net_days: 65 }
+        },
+        events: [
+          { id: "ev-term1-canonical", name: "2026/2027 1st Academic Term", start_date: "2026-09-08", end_date: "2026-12-17", time: "", notes: "" },
+          { id: "ev-term2-canonical", name: "2026/2027 2nd Academic Term", start_date: "2027-01-05", end_date: "2027-03-25", time: "", notes: "" },
+          { id: "ev-term3-canonical", name: "2026/2027 3rd Academic Term", start_date: "2027-04-20", end_date: "2027-07-22", time: "", notes: "" }
+        ]
       };
       await db.seedLocal("academic_calendar", seedCalendar);
     } else {
@@ -1121,7 +1132,7 @@ async function seedMockData() {
             updated = true;
           }
           if (updated) {
-            await db.put("academic_calendar", cal);
+            await db.putLocal("academic_calendar", cal);
           }
         }
       } catch (calUpErr) {}
@@ -1642,7 +1653,7 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
         }
       } catch (e) {}
     } else if (storeName === "academic_calendar" && docId === "main-calendar") {
-      if (localDoc.canonical_terms && !remoteDoc.canonical_terms) return true;
+      if (localDoc.canonical_terms && !remoteDoc.canonical_terms && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
       if (Array.isArray(localDoc.events) && localDoc.events.length > 0 && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
     }
     return false; // Remote is genuinely newer and non-empty
@@ -1665,7 +1676,7 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
       }
     } catch (e) {}
   } else if (storeName === "academic_calendar" && docId === "main-calendar") {
-    if (localDoc.canonical_terms && !remoteDoc.canonical_terms) return true;
+    if (localDoc.canonical_terms && !remoteDoc.canonical_terms && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
     if (Array.isArray(localDoc.events) && localDoc.events.length > 0 && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
   }
 
@@ -1691,16 +1702,47 @@ function sanitizeIncomingDoc(storeName, docId, docData) { if (!docData) return d
         }
       }
     } catch (e) {}
-  } else if (storeName === "academic_calendar" && docId === "main-calendar" && Array.isArray(docData.events)) {
-    docData.events = docData.events.filter(e =>
-      e.id !== "ev-term1" &&
-      e.id !== "ev-term2" &&
-      e.id !== "ev-term3" &&
-      e.id !== "ev-pta" &&
-      e.id !== "ev-midterm" &&
-      e.id !== "ev-exam" &&
-      !(e.name && e.name.includes("2025/2026"))
-    );
+  } else if (storeName === "academic_calendar" && docId === "main-calendar") {
+    if (Array.isArray(docData.events)) {
+      docData.events = docData.events.filter(e =>
+        e.id !== "ev-term1" &&
+        e.id !== "ev-term2" &&
+        e.id !== "ev-term3" &&
+        e.id !== "ev-pta" &&
+        e.id !== "ev-midterm" &&
+        e.id !== "ev-exam" &&
+        !(e.name && e.name.includes("2025/2026"))
+      );
+    }
+    if (!docData.canonical_terms) {
+      docData.canonical_terms = {
+        academic_year: docData.academic_year || "2026/2027",
+        term1: {
+          start_date: docData.term1_start || "2026-09-08",
+          end_date: docData.term1_end || "2026-12-17",
+          midterm_start: docData.midterm_start || "2026-10-19",
+          midterm_end: docData.midterm_end || "2026-10-23",
+          public_holidays: 2,
+          net_days: 70
+        },
+        term2: {
+          start_date: docData.term2_start || "2027-01-05",
+          end_date: docData.term2_end || "2027-03-25",
+          midterm_start: "2027-02-15",
+          midterm_end: "2027-02-19",
+          public_holidays: 3,
+          net_days: 55
+        },
+        term3: {
+          start_date: docData.term3_start || "2027-04-20",
+          end_date: docData.term3_end || "2027-07-22",
+          midterm_start: "2027-06-07",
+          midterm_end: "2027-06-11",
+          public_holidays: 2,
+          net_days: 65
+        }
+      };
+    }
   }
   return docData;
 }
@@ -1791,7 +1833,7 @@ async function startFirestoreSync(specificStores = null) {
       }
       // --------------------------------
 
-      if (lastSync) {
+      if (lastSync && storeName !== "academic_calendar") {
         initialQuery = initialQuery.where("updated_at", ">", lastSync);
       }
 
@@ -1828,7 +1870,7 @@ async function startFirestoreSync(specificStores = null) {
       });
 
       // 2. Real-time multi-device listener (Restricted to save Firebase read costs)
-      const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests", "cms_content"];
+      const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests", "cms_content", "academic_calendar"];
       if (REALTIME_STORES.includes(storeName)) {
         let queries = [];
         if (window.currentUser) {
@@ -1928,6 +1970,7 @@ seedMockData()
 // Export objects
 window.db = db;
 window.initDB = initDB;
+window.shouldKeepLocalDoc = shouldKeepLocalDoc;
 window.startFirestoreSync = startFirestoreSync;
 window.STORES_TO_SYNC = STORES_TO_SYNC;
 

@@ -17025,6 +17025,25 @@ window.addEventListener("dbSyncUpdate", async (e) => {
 // ==========================================
 async function renderAcademicCalendar(container) {
   try {
+    // Fresh pull for academic calendar from cloud Firestore to ensure multi-device sync
+    if (window.firebase && firebase.apps.length > 0 && navigator.onLine) {
+      try {
+        const snap = await firebase.firestore().collection("academic_calendar").doc("main-calendar").get();
+        if (snap.exists) {
+          const remoteCal = snap.data();
+          const localCal = await window.db.get("academic_calendar", "main-calendar");
+          const keepLocal = typeof window.shouldKeepLocalDoc === "function"
+            ? window.shouldKeepLocalDoc("academic_calendar", "main-calendar", localCal, remoteCal)
+            : false;
+          if (!keepLocal) {
+            await window.db.putLocal("academic_calendar", remoteCal);
+          }
+        }
+      } catch (calFetchErr) {
+        console.warn("Direct calendar cloud fetch notice:", calFetchErr);
+      }
+    }
+
     let cal = await window.db.get("academic_calendar", "main-calendar") || {};
     
     // Ensure cal.events is an array if uninitialized; preserve empty list when user deletes events
@@ -17099,8 +17118,8 @@ async function renderAcademicCalendar(container) {
               <div class="form-group" style="margin-bottom:0;">
                 <label style="font-size:0.75rem; font-weight:600;">Term Start & End Dates</label>
                 <div style="display:flex; gap:0.4rem;">
-                  <input type="date" id="t1-start" class="form-control term-calc-input" value="${ct.term1.start_date || '2026-01-05'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
-                  <input type="date" id="t1-end" class="form-control term-calc-input" value="${ct.term1.end_date || '2026-04-15'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
+                  <input type="date" id="t1-start" class="form-control term-calc-input" value="${ct.term1.start_date || cal.term1_start || '2026-09-08'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
+                  <input type="date" id="t1-end" class="form-control term-calc-input" value="${ct.term1.end_date || cal.term1_end || '2026-12-17'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
                 </div>
               </div>
               <div class="form-group" style="margin-bottom:0;">
@@ -17128,8 +17147,8 @@ async function renderAcademicCalendar(container) {
               <div class="form-group" style="margin-bottom:0;">
                 <label style="font-size:0.75rem; font-weight:600;">Term Start & End Dates</label>
                 <div style="display:flex; gap:0.4rem;">
-                  <input type="date" id="t2-start" class="form-control term-calc-input" value="${ct.term2.start_date || '2026-05-04'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
-                  <input type="date" id="t2-end" class="form-control term-calc-input" value="${ct.term2.end_date || '2026-07-31'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
+                  <input type="date" id="t2-start" class="form-control term-calc-input" value="${ct.term2.start_date || cal.term2_start || '2027-01-05'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
+                  <input type="date" id="t2-end" class="form-control term-calc-input" value="${ct.term2.end_date || cal.term2_end || '2027-03-25'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
                 </div>
               </div>
               <div class="form-group" style="margin-bottom:0;">
@@ -17157,8 +17176,8 @@ async function renderAcademicCalendar(container) {
               <div class="form-group" style="margin-bottom:0;">
                 <label style="font-size:0.75rem; font-weight:600;">Term Start & End Dates</label>
                 <div style="display:flex; gap:0.4rem;">
-                  <input type="date" id="t3-start" class="form-control term-calc-input" value="${ct.term3.start_date || '2026-08-03'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
-                  <input type="date" id="t3-end" class="form-control term-calc-input" value="${ct.term3.end_date || '2026-12-11'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
+                  <input type="date" id="t3-start" class="form-control term-calc-input" value="${ct.term3.start_date || cal.term3_start || '2027-04-20'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
+                  <input type="date" id="t3-end" class="form-control term-calc-input" value="${ct.term3.end_date || cal.term3_end || '2027-07-22'}" ${!canEditCalendar ? 'disabled' : ''} style="font-size:0.8rem;">
                 </div>
               </div>
               <div class="form-group" style="margin-bottom:0;">
@@ -17404,14 +17423,64 @@ async function renderAcademicCalendar(container) {
           freshCal.midterm_start = t1MidStart;
           freshCal.midterm_end = t1MidEnd;
 
-          // Synchronize matching events in events list if present
-          if (Array.isArray(freshCal.events)) {
-            const e1 = freshCal.events.find(e => /term\s*1/i.test(e.name));
-            if (e1) { e1.start_date = t1Start; e1.end_date = t1End; }
-            const e2 = freshCal.events.find(e => /term\s*2/i.test(e.name));
-            if (e2) { e2.start_date = t2Start; e2.end_date = t2End; }
-            const e3 = freshCal.events.find(e => /term\s*3/i.test(e.name));
-            if (e3) { e3.start_date = t3Start; e3.end_date = t3End; }
+          if (!Array.isArray(freshCal.events)) {
+            freshCal.events = [];
+          }
+
+          // Robust matcher for canonical terms
+          const isTerm1 = ev => /((\b1st\b|\bfirst\b|\bterm\s*1\b|\b1\s*term\b).*academic\s*term|academic\s*term.*(\b1st\b|\bfirst\b|\bterm\s*1\b)|\bterm\s*1\b|\b1st\s*term\b|\bfirst\s*term\b)/i.test(ev.name);
+          const isTerm2 = ev => /((\b2nd\b|\bsecond\b|\bterm\s*2\b|\b2\s*term\b).*academic\s*term|academic\s*term.*(\b2nd\b|\bsecond\b|\bterm\s*2\b)|\bterm\s*2\b|\b2nd\s*term\b|\bsecond\s*term\b)/i.test(ev.name);
+          const isTerm3 = ev => /((\b3rd\b|\bthird\b|\bterm\s*3\b|\b3\s*term\b).*academic\s*term|academic\s*term.*(\b3rd\b|\bthird\b|\bterm\s*3\b)|\bterm\s*3\b|\b3rd\s*term\b|\bthird\s*term\b)/i.test(ev.name);
+
+          // Synchronize or create Term 1 event
+          const e1 = freshCal.events.find(isTerm1);
+          if (e1) {
+            e1.name = `${acadYear} 1st Academic Term`;
+            e1.start_date = t1Start;
+            e1.end_date = t1End;
+          } else {
+            freshCal.events.push({
+              id: "ev-" + Date.now() + "-t1",
+              name: `${acadYear} 1st Academic Term`,
+              start_date: t1Start,
+              end_date: t1End,
+              time: "",
+              notes: ""
+            });
+          }
+
+          // Synchronize or create Term 2 event
+          const e2 = freshCal.events.find(isTerm2);
+          if (e2) {
+            e2.name = `${acadYear} 2nd Academic Term`;
+            e2.start_date = t2Start;
+            e2.end_date = t2End;
+          } else {
+            freshCal.events.push({
+              id: "ev-" + (Date.now() + 1) + "-t2",
+              name: `${acadYear} 2nd Academic Term`,
+              start_date: t2Start,
+              end_date: t2End,
+              time: "",
+              notes: ""
+            });
+          }
+
+          // Synchronize or create Term 3 event
+          const e3 = freshCal.events.find(isTerm3);
+          if (e3) {
+            e3.name = `${acadYear} 3rd Academic Term`;
+            e3.start_date = t3Start;
+            e3.end_date = t3End;
+          } else {
+            freshCal.events.push({
+              id: "ev-" + (Date.now() + 2) + "-t3",
+              name: `${acadYear} 3rd Academic Term`,
+              start_date: t3Start,
+              end_date: t3End,
+              time: "",
+              notes: ""
+            });
           }
 
           freshCal.calendar_id = "main-calendar";
@@ -17422,9 +17491,18 @@ async function renderAcademicCalendar(container) {
           if (window.api && typeof window.api.syncToFirebase === "function") {
             window.api.syncToFirebase("academic_calendar", freshCal).catch(() => {});
           }
+          if (window.firebase && firebase.apps.length > 0 && navigator.onLine) {
+            try {
+              await firebase.firestore().collection("academic_calendar").doc("main-calendar").set(freshCal);
+            } catch (fsErr) {
+              console.warn("Direct Firestore set for calendar notice:", fsErr);
+            }
+          }
 
           refreshCanonicalTermBadges();
-          showToast("Canonical Academic Terms saved and attendance days calibrated successfully!", "success");
+          await loadEventsList();
+          window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "academic_calendar", docData: freshCal } }));
+          showToast("Canonical Academic Terms saved and Scheduled Calendar Events updated successfully!", "success");
         } catch (err) {
           console.error("Save canonical terms failed:", err);
           showToast("Error saving academic terms: " + (err.message || err), "danger");
@@ -17608,9 +17686,15 @@ async function renderAcademicCalendar(container) {
               currentCal.updated_at = new Date().toISOString();
               await window.db.put("academic_calendar", currentCal);
               await initAcademicCalendarCache();
+              if (window.firebase && firebase.apps.length > 0 && navigator.onLine) {
+                try {
+                  await firebase.firestore().collection("academic_calendar").doc("main-calendar").set(currentCal);
+                } catch (fsErr) {}
+              }
               showToast("Calendar event deleted successfully", "info");
               resetEventForm();
               await loadEventsList();
+              window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "academic_calendar", docData: currentCal } }));
             }
           });
         });
@@ -17669,19 +17753,47 @@ async function renderAcademicCalendar(container) {
           }
 
           // Sync canonical term dates if term events exist
-          const t1 = freshCal.events.find(e => /term\s*1/i.test(e.name));
-          if (t1) { freshCal.term1_start = t1.start_date; freshCal.term1_end = t1.end_date || t1.start_date; }
-          const t2 = freshCal.events.find(e => /term\s*2/i.test(e.name));
-          if (t2) { freshCal.term2_start = t2.start_date; freshCal.term2_end = t2.end_date || t2.start_date; }
-          const t3 = freshCal.events.find(e => /term\s*3/i.test(e.name));
-          if (t3) { freshCal.term3_start = t3.start_date; freshCal.term3_end = t3.end_date || t3.start_date; }
+          const isTerm1Matcher = ev => /((\b1st\b|\bfirst\b|\bterm\s*1\b|\b1\s*term\b).*academic\s*term|academic\s*term.*(\b1st\b|\bfirst\b|\bterm\s*1\b)|\bterm\s*1\b|\b1st\s*term\b|\bfirst\s*term\b)/i.test(ev.name);
+          const isTerm2Matcher = ev => /((\b2nd\b|\bsecond\b|\bterm\s*2\b|\b2\s*term\b).*academic\s*term|academic\s*term.*(\b2nd\b|\bsecond\b|\bterm\s*2\b)|\bterm\s*2\b|\b2nd\s*term\b|\bsecond\s*term\b)/i.test(ev.name);
+          const isTerm3Matcher = ev => /((\b3rd\b|\bthird\b|\bterm\s*3\b|\b3\s*term\b).*academic\s*term|academic\s*term.*(\b3rd\b|\bthird\b|\bterm\s*3\b)|\bterm\s*3\b|\b3rd\s*term\b|\bthird\s*term\b)/i.test(ev.name);
+
+          const t1 = freshCal.events.find(isTerm1Matcher);
+          if (t1) {
+            freshCal.term1_start = t1.start_date; freshCal.term1_end = t1.end_date || t1.start_date;
+            if (freshCal.canonical_terms && freshCal.canonical_terms.term1) {
+              freshCal.canonical_terms.term1.start_date = t1.start_date;
+              freshCal.canonical_terms.term1.end_date = t1.end_date || t1.start_date;
+            }
+          }
+          const t2 = freshCal.events.find(isTerm2Matcher);
+          if (t2) {
+            freshCal.term2_start = t2.start_date; freshCal.term2_end = t2.end_date || t2.start_date;
+            if (freshCal.canonical_terms && freshCal.canonical_terms.term2) {
+              freshCal.canonical_terms.term2.start_date = t2.start_date;
+              freshCal.canonical_terms.term2.end_date = t2.end_date || t2.start_date;
+            }
+          }
+          const t3 = freshCal.events.find(isTerm3Matcher);
+          if (t3) {
+            freshCal.term3_start = t3.start_date; freshCal.term3_end = t3.end_date || t3.start_date;
+            if (freshCal.canonical_terms && freshCal.canonical_terms.term3) {
+              freshCal.canonical_terms.term3.start_date = t3.start_date;
+              freshCal.canonical_terms.term3.end_date = t3.end_date || t3.start_date;
+            }
+          }
 
           freshCal.calendar_id = "main-calendar";
           freshCal.updated_at = new Date().toISOString();
           await window.db.put("academic_calendar", freshCal);
           await initAcademicCalendarCache();
+          if (window.firebase && firebase.apps.length > 0 && navigator.onLine) {
+            try {
+              await firebase.firestore().collection("academic_calendar").doc("main-calendar").set(freshCal);
+            } catch (fsErr) {}
+          }
           resetEventForm();
           await loadEventsList();
+          window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "academic_calendar", docData: freshCal } }));
         } catch (err) {
           console.error("Save calendar event error:", err);
           showToast("Failed to save event", "danger");
