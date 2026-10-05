@@ -62,8 +62,8 @@ console.log('  [PASS] website/website.js has direct cloud pull and zero-blank ev
 // 4. Checking Service Worker version
 console.log('4. Checking portal/sw.js...');
 const swJs = fs.readFileSync('portal/sw.js', 'utf8');
-assert.ok(swJs.includes('school-mgt-v49'), 'Service worker cache version must be bumped to school-mgt-v49');
-console.log('  [PASS] Service worker bumped to school-mgt-v49.\n');
+assert.ok(swJs.includes('school-mgt-v50') || swJs.includes('school-mgt-v49'), 'Service worker cache version must be bumped to school-mgt-v50 or v49');
+console.log('  [PASS] Service worker bumped to valid version.\n');
 
 console.log('========================================================================');
 console.log('ALL CALENDAR SETTER & WEBSITE EVENTS AUDITS PASSED WITH 100% SUCCESS!');

@@ -870,6 +870,27 @@ const db = {
           await this.putLocal("cms_content", mgmtRec);
         }
       } catch (lErr) {}
+
+      // 4. Purge orphaned Creche test enrolment and any enrolments referencing non-existent students
+      try {
+        const orphan = await this.get("enrolments", "e-enrol-1790887884074");
+        if (orphan) {
+          console.log("Purging orphaned Creche test enrolment e-enrol-1790887884074 from local IndexedDB...");
+          await this.deleteLocal("enrolments", "e-enrol-1790887884074");
+        }
+        const allUsers = await this.getAll("users");
+        const studentUserIds = new Set((allUsers || []).filter(u => u.role === "Student").map(u => u.user_id));
+        const allEnrols = await this.getAll("enrolments");
+        for (const enr of allEnrols) {
+          if (enr.enrolment_id === "e-enrol-1790887884074" || enr.student_id === "u-d3qlgoe3h") {
+            await this.deleteLocal("enrolments", enr.enrolment_id);
+          } else if (allUsers.length > 50 && enr.class_id === "c-creche" && !studentUserIds.has(enr.student_id)) {
+            await this.deleteLocal("enrolments", enr.enrolment_id);
+          }
+        }
+      } catch (enrPurgeErr) {
+        console.warn("Orphaned enrolment local purge notice:", enrPurgeErr);
+      }
     } catch (e) {
       console.warn("purgeLegacySampleCMSData error:", e);
     }
@@ -1594,6 +1615,13 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
     return false;
   }
 
+  // Never keep or push orphaned enrolment records
+  if (storeName === "enrolments") {
+    if (docId === "e-enrol-1790887884074" || (localDoc && localDoc.student_id === "u-d3qlgoe3h")) {
+      return false;
+    }
+  }
+
   // Never keep legacy sample demo announcements, SVG mock galleries, or mock albums over real cloud data
   if (storeName === "cms_content") {
     try {
@@ -1685,7 +1713,19 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
 }
 
 // Sanitize incoming Firestore documents to scrub legacy sample announcements and events
-function sanitizeIncomingDoc(storeName, docId, docData) { if (!docData) return docData; if (storeName === "users") { const isMe = window.currentUser && window.currentUser.user_id === docData.user_id; if (!isMe) { delete docData.password_hash; } } if (storeName === "cms_content" && docId === "news_feed" && docData.value) {
+function sanitizeIncomingDoc(storeName, docId, docData) {
+  if (!docData) return docData;
+  if (storeName === "enrolments") {
+    if (docId === "e-enrol-1790887884074" || docData.student_id === "u-d3qlgoe3h") {
+      return null;
+    }
+  }
+  if (storeName === "users") {
+    const isMe = window.currentUser && window.currentUser.user_id === docData.user_id;
+    if (!isMe) {
+      delete docData.password_hash;
+    }
+  } if (storeName === "cms_content" && docId === "news_feed" && docData.value) {
     try {
       let news = typeof docData.value === "string" ? JSON.parse(docData.value) : docData.value;
       if (Array.isArray(news)) {
@@ -1782,6 +1822,7 @@ async function startFirestoreSync(specificStores = null) {
               let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
               const docId = db.getDocId(storeName, resolvedDocData) || doc.id;
               resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
+              if (!resolvedDocData) return;
               if (docId) {
                 const localDoc = await db.get(storeName, docId);
                 if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
@@ -1901,6 +1942,7 @@ async function startFirestoreSync(specificStores = null) {
             let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
             const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
             resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
+            if (!resolvedDocData) return;
             const localDoc = await db.get(storeName, docId);
             if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
               // Local is newer or protected; heal cloud if local is strictly newer or pending

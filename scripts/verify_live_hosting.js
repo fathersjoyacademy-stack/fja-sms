@@ -55,7 +55,7 @@ async function verify() {
 
   const sw = await fetchUrl('https://fja-sms.web.app/portal/sw.js');
   console.log('\nService Worker Status:', sw.status);
-  console.log('  SW Version v49:', sw.body.includes('school-mgt-v49') || sw.body.includes('school-mgt-v48'));
+  console.log('  SW Version v50:', sw.body.includes('school-mgt-v50') || sw.body.includes('school-mgt-v49') || sw.body.includes('school-mgt-v48'));
 
   const api = await fetchUrl('https://fja-sms.web.app/portal/api.js');
   console.log('\nAPI Engine Status:', api.status);

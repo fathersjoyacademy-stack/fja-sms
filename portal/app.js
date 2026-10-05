@@ -12083,8 +12083,10 @@ async function renderAcademicQuality(container) {
     }
 
     function renderClassesBreakdown() {
+      const activeStudentIds = new Set(activeStudents.map(s => s.user_id));
+      const validEnrolments = enrolments.filter(e => activeStudentIds.has(e.student_id));
       classesRows.innerHTML = classes.map(c => {
-        const classEnrols = enrolments.filter(e => e.class_id === c.class_id);
+        const classEnrols = validEnrolments.filter(e => e.class_id === c.class_id);
         const classStudIds = classEnrols.map(e => e.student_id);
         const classScores = rangeScores.filter(s => classStudIds.includes(s.student_id));
 
@@ -12137,7 +12139,9 @@ async function renderAcademicQuality(container) {
       studentsCard.classList.remove("portal-hidden");
       window.scrollTo({ top: studentsCard.offsetTop, behavior: 'smooth' });
 
-      const classEnrols = enrolments.filter(e => e.class_id === classId);
+      const activeStudentIds = new Set(activeStudents.map(s => s.user_id));
+      const validEnrolments = enrolments.filter(e => activeStudentIds.has(e.student_id));
+      const classEnrols = validEnrolments.filter(e => e.class_id === classId);
       const classStudIds = classEnrols.map(e => e.student_id);
       const classStuds = activeStudents.filter(s => classStudIds.includes(s.user_id));
 
@@ -12275,9 +12279,10 @@ async function renderAcademicQuality(container) {
 
     function renderAttendClassesBreakdown(rangeAttendance, studentUserIds) {
       const rowsBody = document.getElementById("drilldown-attend-classes-rows");
+      const validEnrolments = enrolments.filter(e => studentUserIds.includes(e.student_id));
       
       rowsBody.innerHTML = classes.map(c => {
-        const classEnrols = enrolments.filter(e => e.class_id === c.class_id);
+        const classEnrols = validEnrolments.filter(e => e.class_id === c.class_id);
         const classStudIds = classEnrols.map(e => e.student_id);
         
         const classAtt = rangeAttendance.filter(a => classStudIds.includes(a.user_id));
@@ -12338,7 +12343,8 @@ async function renderAcademicQuality(container) {
       card.classList.remove("portal-hidden");
       card.scrollIntoView({ behavior: 'smooth' });
 
-      const classEnrols = enrolments.filter(e => e.class_id === classId);
+      const validEnrolments = enrolments.filter(e => users.some(u => u.role === "Student" && u.user_id === e.student_id));
+      const classEnrols = validEnrolments.filter(e => e.class_id === classId);
       const classStudIds = classEnrols.map(e => e.student_id);
       const classStuds = users.filter(u => u.role === "Student" && classStudIds.includes(u.user_id));
 
@@ -12744,9 +12750,11 @@ async function renderAttendanceTracker(container) {
 
     function renderStudentClassesDrilldown() {
       const { students, rangeAtt, enrolments, classes } = studentDataFiltered;
+      const validStudentIds = new Set((students || []).map(s => s.user_id));
+      const validEnrolments = (enrolments || []).filter(e => validStudentIds.has(e.student_id));
 
       studClassesRows.innerHTML = classes.map(cl => {
-        const classEnrols = enrolments.filter(e => e.class_id === cl.class_id);
+        const classEnrols = validEnrolments.filter(e => e.class_id === cl.class_id);
         const classStudIds = classEnrols.map(e => e.student_id);
         const classAtt = rangeAtt.filter(a => classStudIds.includes(a.user_id));
 
@@ -12783,7 +12791,9 @@ async function renderAttendanceTracker(container) {
       studIndivCard.classList.remove("portal-hidden");
       window.scrollTo({ top: studIndivCard.offsetTop, behavior: 'smooth' });
 
-      const classEnrols = enrolments.filter(e => e.class_id === classId);
+      const validStudentIds = new Set((students || []).map(s => s.user_id));
+      const validEnrolments = (enrolments || []).filter(e => validStudentIds.has(e.student_id));
+      const classEnrols = validEnrolments.filter(e => e.class_id === classId);
       const classStudIds = classEnrols.map(e => e.student_id);
       const classStuds = students.filter(s => classStudIds.includes(s.user_id));
 
@@ -17823,6 +17833,10 @@ async function renderRecordsDashboard(container) {
     const activeStuds = students.filter(s => s.status === "ACTIVE").length;
     const activeStaff = staff.filter(s => s.status === "ACTIVE").length;
 
+    // Filter enrolments defensively to only match real, active students
+    const activeStudentIds = new Set(students.filter(s => s.status === "ACTIVE").map(s => s.user_id));
+    const validEnrolments = enrolments.filter(e => activeStudentIds.has(e.student_id));
+
     // Calculate today's average attendance rate or fallback to cumulative profile attendance
     const today = new Date().toISOString().substring(0, 10);
     const todayAtt = attendance.filter(a => a.date === today);
@@ -17872,7 +17886,7 @@ async function renderRecordsDashboard(container) {
         <div class="card" style="width:100%;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
             <h3>Student Enrollments by Class / Grade</h3>
-            <span class="badge badge-info">${enrolments.length} Total Enrolled</span>
+            <span class="badge badge-info">${validEnrolments.length} Total Enrolled</span>
           </div>
           <div style="position:relative; margin-top:1rem; height:220px;">
             <canvas id="rec-enroll-chart-canvas"></canvas>
@@ -17920,13 +17934,13 @@ async function renderRecordsDashboard(container) {
 
       // 1. Enrollment Chart
       const classLabels = sortedClasses.map(c => c.class_name);
-      const classData = sortedClasses.map(c => enrolments.filter(e => e.class_id === c.class_id).length);
+      const classData = sortedClasses.map(c => validEnrolments.filter(e => e.class_id === c.class_id).length);
 
       // Render Canonical Enrollment Table
       const tableBody = document.getElementById("rec-enroll-table-rows");
       if (tableBody) {
         tableBody.innerHTML = sortedClasses.map(c => {
-          const count = enrolments.filter(e => e.class_id === c.class_id).length;
+          const count = validEnrolments.filter(e => e.class_id === c.class_id).length;
           const teacher = staff.find(s => s.user_id === c.class_teacher_id);
           const teacherName = teacher ? `${teacher.first_name} ${teacher.last_name}` : "Unassigned";
           const sectionName = getSectionFromClassName(c.class_name);
@@ -18039,6 +18053,9 @@ const scores = await window.db.getAll("student_scores");
 const attendance = await window.db.getAll("attendance");
 const currentUser = window.api.getCurrentUser();
 const isProprietor = currentUser && currentUser.role === "Proprietor";
+
+const validStudentIds = new Set(users.filter(u => u.role === "Student" && u.status === "ACTIVE").map(u => u.user_id));
+const validEnrolments = enrolments.filter(e => validStudentIds.has(e.student_id));
 
 const teachers = users.filter(u => (u.role === "Teacher" || u.role === "SectionalHead") && u.status === "ACTIVE");
 
@@ -18381,7 +18398,7 @@ function renderList() {
         const tCls = classes.filter(c => c.class_teacher_id === t.user_id);
         if (tCls.length === 0) return -1;
         const cIds = tCls.map(c => c.class_id);
-        const cStuds = enrolments.filter(e => cIds.includes(e.class_id)).map(e => e.student_id);
+        const cStuds = validEnrolments.filter(e => cIds.includes(e.class_id)).map(e => e.student_id);
         if (cStuds.length === 0) return -1;
         const cScores = scores.filter(s => cStuds.includes(s.student_id));
         if (cScores.length === 0) return -1;
@@ -18413,7 +18430,7 @@ function renderList() {
     let classAvgStr = "N/A";
     if (tClasses.length > 0) {
       const classIds = tClasses.map(c => c.class_id);
-      const classStuds = enrolments.filter(e => classIds.includes(e.class_id)).map(e => e.student_id);
+      const classStuds = validEnrolments.filter(e => classIds.includes(e.class_id)).map(e => e.student_id);
       if (classStuds.length > 0) {
         const classScores = scores.filter(s => classStuds.includes(s.student_id));
         if (classScores.length > 0) {
