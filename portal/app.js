@@ -3178,10 +3178,16 @@ async function renderAccountProvisioning(container) {
         return;
       }
 
+      const allClasses = await window.db.getAll("classes") || [];
+      const chosenClass = allClasses.find(c => c.class_id === classId);
+      const chosenClassName = chosenClass ? chosenClass.class_name : "";
+
       const photo_url = document.getElementById("stud-photo-base64").value || "";
       const userPayload = { first_name: first, other_name: other, last_name: last, gender, phone, email, role: "Student", date_of_birth: dob };
       const profilePayload = {
         address,
+        current_class_id: classId || "",
+        current_class_name: chosenClassName || "",
         father_name: fatherName,
         father_occupation: fatherOccupation,
         father_phone: fatherPhone,
@@ -3199,12 +3205,18 @@ async function renderAccountProvisioning(container) {
       const newUser = await window.api.createAccount(userPayload, profilePayload);
       
       // Enrol in Class
-      const enrolmentId = "e-enrol-" + Date.now();
-      await window.db.put("enrolments", {
-        enrolment_id: enrolmentId,
-        student_id: newUser.user_id,
-        class_id: classId
-      });
+      if (classId) {
+        const enrolmentId = "e-enrol-" + Date.now();
+        await window.db.put("enrolments", {
+          enrolment_id: enrolmentId,
+          student_id: newUser.user_id,
+          class_id: classId,
+          academic_year: "2026/2027",
+          status: "ACTIVE",
+          enrolled_at: new Date().toISOString().substring(0, 10),
+          promoted_2026_2027: true
+        });
+      }
       
       showToast(`Student account successfully created for ${first} ${last}!`, "success");
       document.getElementById("form-create-student").reset();
@@ -3413,7 +3425,11 @@ async function renderAccountProvisioning(container) {
               await window.db.put("enrolments", {
                 enrolment_id: enrolmentId,
                 student_id: newUser.user_id,
-                class_id: classId
+                class_id: classId,
+                academic_year: "2026/2027",
+                status: "ACTIVE",
+                enrolled_at: new Date().toISOString().substring(0, 10),
+                promoted_2026_2027: true
               });
             }
             importCount++;
@@ -6036,7 +6052,11 @@ async function renderAdmissionsIntake(container) {
           const newEnrol = classId ? {
             enrolment_id: enrolmentId,
             student_id: student.user_id,
-            class_id: classId
+            class_id: classId,
+            academic_year: "2026/2027",
+            status: "ACTIVE",
+            enrolled_at: new Date().toISOString().substring(0, 10),
+            promoted_2026_2027: true
           } : null;
 
           const newInvoice = {
@@ -15809,6 +15829,9 @@ async function renderRecordsManagement(container) {
           if (chosenClassId) {
             if (studentEnrol) {
               studentEnrol.class_id = chosenClassId;
+              studentEnrol.academic_year = "2026/2027";
+              studentEnrol.status = "ACTIVE";
+              studentEnrol.promoted_2026_2027 = true;
               await window.db.put("enrolments", studentEnrol);
             } else {
               await window.db.put("enrolments", {
@@ -15817,7 +15840,8 @@ async function renderRecordsManagement(container) {
                 class_id: chosenClassId,
                 academic_year: "2026/2027",
                 term: "Term 1",
-                status: "ACTIVE"
+                status: "ACTIVE",
+                promoted_2026_2027: true
               });
             }
           } else if (studentEnrol) {

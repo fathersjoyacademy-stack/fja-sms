@@ -888,6 +888,33 @@ const db = {
             await this.deleteLocal("enrolments", enr.enrolment_id);
           }
         }
+
+        // 5. Ensure 2026/2027 Creche students are properly mapped to c-creche in local cache
+        const crecheStudentUserIds = ["u-j008jnsmd", "u-l8arzvhms", "u-a735towfj"];
+        for (const enr of allEnrols) {
+          if (crecheStudentUserIds.includes(enr.student_id) && enr.class_id !== "c-creche") {
+            enr.class_id = "c-creche";
+            enr.academic_year = "2026/2027";
+            enr.status = "ACTIVE";
+            enr.promoted_2026_2027 = true;
+            enr.previous_class_id = "";
+            await this.putLocal("enrolments", enr);
+          }
+        }
+        try {
+          const profs = await this.getAll("profiles");
+          for (const uId of crecheStudentUserIds) {
+            const p = profs.find(prof => prof.user_id === uId);
+            if (p && p.current_class_id !== "c-creche") {
+              p.current_class_id = "c-creche";
+              p.current_class_name = "Creche";
+              p.previous_class_id = "";
+              p.previous_class_name = "";
+              p.academic_history = "[]";
+              await this.putLocal("profiles", p);
+            }
+          }
+        } catch (cpErr) {}
       } catch (enrPurgeErr) {
         console.warn("Orphaned enrolment local purge notice:", enrPurgeErr);
       }
@@ -1294,7 +1321,7 @@ async function seedMockData() {
 
       let needsPromotion = false;
       for (const enr of allEnrolments) {
-        if (studentUserIds.has(enr.student_id) && (!enr.academic_year || enr.academic_year === "2025/2026" || !enr.promoted_2026_2027)) {
+        if (studentUserIds.has(enr.student_id) && enr.academic_year === "2025/2026" && !enr.promoted_2026_2027) {
           needsPromotion = true;
           break;
         }
@@ -1304,7 +1331,7 @@ async function seedMockData() {
         console.log("Applying academic progression promotion for 2026/2027 session...");
         for (const enr of allEnrolments) {
           if (!studentUserIds.has(enr.student_id)) continue;
-          if (enr.promoted_2026_2027) continue;
+          if (enr.academic_year !== "2025/2026" || enr.promoted_2026_2027) continue;
 
           const oldClassId = enr.class_id;
           const oldClassName = classMap.get(oldClassId) || oldClassId;
@@ -1618,6 +1645,17 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
   // Never keep or push orphaned enrolment records
   if (storeName === "enrolments") {
     if (docId === "e-enrol-1790887884074" || (localDoc && localDoc.student_id === "u-d3qlgoe3h")) {
+      return false;
+    }
+    // Prevent stale promoted nursery1 record from overriding creche in 2026/2027
+    if (localDoc && ["u-j008jnsmd", "u-l8arzvhms", "u-a735towfj"].includes(localDoc.student_id) && localDoc.class_id === "c-nursery1") {
+      return false;
+    }
+  }
+
+  if (storeName === "profiles") {
+    // Prevent stale promoted nursery1 profile from overriding creche in 2026/2027
+    if (localDoc && ["u-j008jnsmd", "u-l8arzvhms", "u-a735towfj"].includes(localDoc.user_id) && localDoc.current_class_id === "c-nursery1") {
       return false;
     }
   }

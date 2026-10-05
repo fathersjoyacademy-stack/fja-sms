@@ -29,12 +29,14 @@ assert.ok(appJs.includes('${validEnrolments.length} Total Enrolled'), 'app.js re
 assert.ok(appJs.includes('validEnrolments.filter(e => e.class_id === c.class_id).length'), 'app.js renderRecordsDashboard must compute class count using validEnrolments');
 console.log('  [PASS] portal/app.js enforces validEnrolments across charts, cards, and tables.\n');
 
-// 3. Simulate enrollment tally logic with mock data containing the orphan
-console.log('3. Simulating enrollment count with orphan document injected...');
+// 3. Simulate enrollment tally logic with mock data containing real Creche students and orphan
+console.log('3. Simulating enrollment count with orphan document and real Creche students...');
 const mockUsers = [
-  { user_id: 'u-1', role: 'Student', status: 'ACTIVE' },
-  { user_id: 'u-2', role: 'Student', status: 'ACTIVE' },
-  { user_id: 'u-3', role: 'Student', status: 'ACTIVE' }
+  { user_id: 'u-creche-1', role: 'Student', status: 'ACTIVE' },
+  { user_id: 'u-creche-2', role: 'Student', status: 'ACTIVE' },
+  { user_id: 'u-creche-3', role: 'Student', status: 'ACTIVE' },
+  { user_id: 'u-nursery-1', role: 'Student', status: 'ACTIVE' },
+  { user_id: 'u-nursery-2', role: 'Student', status: 'ACTIVE' }
 ];
 
 const mockClasses = [
@@ -42,11 +44,14 @@ const mockClasses = [
   { class_id: 'c-nursery1', class_name: 'Nursery 1' }
 ];
 
-// e-enrol-orphan points to non-existent student u-d3qlgoe3h in Creche
+// 3 real Creche students + 1 orphan + 2 Nursery students
 const mockEnrolments = [
   { enrolment_id: 'e-enrol-1790887884074', class_id: 'c-creche', student_id: 'u-d3qlgoe3h', status: 'ACTIVE' },
-  { enrolment_id: 'e-enrol-real-1', class_id: 'c-nursery1', student_id: 'u-1', status: 'ACTIVE' },
-  { enrolment_id: 'e-enrol-real-2', class_id: 'c-nursery1', student_id: 'u-2', status: 'ACTIVE' }
+  { enrolment_id: 'e-creche-1', class_id: 'c-creche', student_id: 'u-creche-1', status: 'ACTIVE' },
+  { enrolment_id: 'e-creche-2', class_id: 'c-creche', student_id: 'u-creche-2', status: 'ACTIVE' },
+  { enrolment_id: 'e-creche-3', class_id: 'c-creche', student_id: 'u-creche-3', status: 'ACTIVE' },
+  { enrolment_id: 'e-nursery-1', class_id: 'c-nursery1', student_id: 'u-nursery-1', status: 'ACTIVE' },
+  { enrolment_id: 'e-nursery-2', class_id: 'c-nursery1', student_id: 'u-nursery-2', status: 'ACTIVE' }
 ];
 
 // App logic under test:
@@ -57,20 +62,20 @@ const crecheCount = validEnrolments.filter(e => e.class_id === 'c-creche').lengt
 const nurseryCount = validEnrolments.filter(e => e.class_id === 'c-nursery1').length;
 const totalCount = validEnrolments.length;
 
-console.log(`  Creche count: ${crecheCount} (Expected: 0)`);
+console.log(`  Creche count: ${crecheCount} (Expected: 3)`);
 console.log(`  Nursery 1 count: ${nurseryCount} (Expected: 2)`);
-console.log(`  Total enrolled: ${totalCount} (Expected: 2)`);
+console.log(`  Total enrolled: ${totalCount} (Expected: 5)`);
 
-assert.strictEqual(crecheCount, 0, 'Creche count must be 0 even if orphan enrolment document exists');
+assert.strictEqual(crecheCount, 3, 'Creche count must strictly be 3 (real students only, ignoring orphan)');
 assert.strictEqual(nurseryCount, 2, 'Nursery 1 count must accurately match valid active students');
-assert.strictEqual(totalCount, 2, 'Total enrolled count must ignore the orphan document');
-console.log('  [PASS] Simulation proves Creche displays 0 enrolled students!\n');
+assert.strictEqual(totalCount, 5, 'Total enrolled count must ignore the orphan document');
+console.log('  [PASS] Simulation proves Creche accurately reflects real students without promotion distortion!\n');
 
 // 4. Checking Service Worker version
 console.log('4. Checking portal/sw.js...');
 const swJs = fs.readFileSync('portal/sw.js', 'utf8');
-assert.ok(swJs.includes('school-mgt-v50'), 'portal/sw.js must be bumped to school-mgt-v50');
-console.log('  [PASS] Service worker bumped to school-mgt-v50.\n');
+assert.ok(swJs.includes('school-mgt-v51'), 'portal/sw.js must be bumped to school-mgt-v51');
+console.log('  [PASS] Service worker bumped to school-mgt-v51.\n');
 
 console.log('========================================================================');
 console.log('ALL CRECHE ENROLLMENT & ORPHAN DEFENSE AUDITS PASSED WITH 100% SUCCESS!');

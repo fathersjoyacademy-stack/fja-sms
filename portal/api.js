@@ -430,6 +430,8 @@ const api = {
       mother_details: JSON.stringify(profilePayload.mother_details || { name: profilePayload.mother_name || "", occupation: profilePayload.mother_occupation || "", phone: profilePayload.mother_phone || "" }),
       base_salary: parseFloat(profilePayload.base_salary) || 0.00,
       allowances: parseFloat(profilePayload.allowances) || 0.00,
+      current_class_id: profilePayload.current_class_id || "",
+      current_class_name: profilePayload.current_class_name || "",
       section: profilePayload.section || "",
       appointment_date: profilePayload.appointment_date || new Date().toISOString().split("T")[0]
     };
