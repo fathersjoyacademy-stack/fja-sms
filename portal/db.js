@@ -511,7 +511,7 @@ const db = {
         const transaction = db.transaction(storeName, "readonly");
         const store = transaction.objectStore(storeName);
         const request = store.get(key);
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => { const res = request.result; resolve(res && res.is_deleted === true ? undefined : res); };
         request.onerror = () => reject(request.error);
       });
     });
@@ -526,22 +526,14 @@ const db = {
         const index = store.index(indexName);
         const range = IDBKeyRange.only(value);
         const request = index.getAll(range);
-        request.onsuccess = () => resolve(request.result || []);
+        request.onsuccess = () => { const res = request.result || []; resolve(res.filter(r => r.is_deleted !== true)); };
         request.onerror = () => reject(request.error);
       });
     });
   },
 
   // Get all records
-  getAll(storeName) {
-    return initDB().then((db) => {
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, "readonly");
-        const store = transaction.objectStore(storeName);
-        const request = store.getAll();
-        request.onsuccess = () => {
-          let results = request.result || [];
-          if (storeName === "classes") {
+  getAllRaw(storeName) { return initDB().then((db) => { return new Promise((resolve, reject) => { const transaction = db.transaction(storeName, "readonly"); const store = transaction.objectStore(storeName); const request = store.getAll(); request.onsuccess = () => resolve(request.result || []); request.onerror = () => reject(request.error); }); }); }, getAll(storeName) { return initDB().then((db) => { return new Promise((resolve, reject) => { const transaction = db.transaction(storeName, "readonly"); const store = transaction.objectStore(storeName); const request = store.getAll(); request.onsuccess = () => { let results = request.result || []; results = results.filter(r => r.is_deleted !== true); if (storeName === "classes") {
             const CANONICAL_CLASS_ORDER = [
               "creche",
               "nursery 1",
@@ -583,7 +575,7 @@ const db = {
         const transaction = db.transaction(storeName, "readwrite");
         const store = transaction.objectStore(storeName);
         const request = store.put(obj);
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => { const res = request.result; resolve(res && res.is_deleted === true ? undefined : res); };
         request.onerror = () => reject(request.error);
       });
     });
@@ -690,18 +682,7 @@ const db = {
   },
 
   // Delete record globally
-  delete(storeName, key) {
-    return this.deleteLocal(storeName, key).then((res) => {
-      if (canWriteToCloud(storeName) && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
-        try {
-          firebase.firestore().collection(storeName).doc(key).delete();
-        } catch (err) {
-          console.warn("Firestore delete failed:", err);
-        }
-      }
-      return res;
-    });
-  },
+  delete(storeName, key) { return initDB().then((db) => { return new Promise((resolve, reject) => { const tx = db.transaction(storeName, "readonly"); const store = tx.objectStore(storeName); const req = store.get(key); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); }); }).then((doc) => { if (!doc) return false; doc.is_deleted = true; doc.synced = false; doc.updated_at = new Date().toISOString(); return this.putLocal(storeName, doc).then(() => { if (canWriteToCloud(storeName) && window.isFirebaseConfigured && window.isFirebaseConfigured()) { try { firebase.firestore().collection(storeName).doc(key).delete().then(() => this.deleteLocal(storeName, key)).catch(()=>{}); } catch (err) {} } return true; }); }); },
 
   // Query records matching an index
   queryByIndex(storeName, indexName, value) {
@@ -711,7 +692,7 @@ const db = {
         const store = transaction.objectStore(storeName);
         const index = store.index(indexName);
         const request = index.getAll(value);
-        request.onsuccess = () => resolve(request.result || []);
+        request.onsuccess = () => { const res = request.result || []; resolve(res.filter(r => r.is_deleted !== true)); };
         request.onerror = () => reject(request.error);
       });
     });
@@ -725,7 +706,7 @@ const db = {
         const store = transaction.objectStore(storeName);
         const index = store.index(indexName);
         const request = index.getAll(keyRange);
-        request.onsuccess = () => resolve(request.result || []);
+        request.onsuccess = () => { const res = request.result || []; resolve(res.filter(r => r.is_deleted !== true)); };
         request.onerror = () => reject(request.error);
       });
     });
@@ -1746,13 +1727,7 @@ async function startFirestoreSync(specificStores = null) {
                   if (localTime > remoteTime || localDoc.synced === false) {
                     try {
                       if (navigator.onLine && canWriteToCloud(storeName)) {
-                        if (storeName === "cms_content" && docId === "gallery_images") {
-                          await syncGalleryImagesToFirestore(localDoc);
-                        } else {
-                          await firestore.collection(storeName).doc(docId).set(localDoc);
-                        }
-                        localDoc.synced = true;
-                        await db.putLocal(storeName, localDoc);
+                        if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
                       }
                     } catch (e) {
                       console.warn(`Upward sync push for ${storeName}/${docId} skipped:`, e);
@@ -1831,9 +1806,31 @@ async function startFirestoreSync(specificStores = null) {
       });
 
       // 2. Real-time multi-device listener (Restricted to save Firebase read costs)
-      const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests"];
-      if (REALTIME_STORES.includes(storeName)) {
-        firestore.collection(storeName).onSnapshot(snapshot => {
+              const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests"];
+        if (REALTIME_STORES.includes(storeName)) {
+          let queries = [];
+          if (window.currentUser) {
+            const role = window.currentUser.role;
+            const myId = window.currentUser.user_id;
+            
+            if (storeName === "portal_messages") {
+               queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+               queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+            } else if (storeName === "notifications") {
+               queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+               queries.push(firestore.collection(storeName).where("role", "==", role));
+               queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+            } else if (storeName === "broadcast_requests" && (role === "Teacher" || role === "SectionalHead")) {
+               queries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
+            } else {
+               queries.push(firestore.collection(storeName));
+            }
+          } else {
+            queries.push(firestore.collection(storeName));
+          }
+
+          queries.forEach(q => {
+            q.onSnapshot(snapshot => {
           snapshot.docChanges().forEach(async (change) => {
             const docData = change.doc.data();
             if (change.type === "added" || change.type === "modified") {
@@ -1848,13 +1845,7 @@ async function startFirestoreSync(specificStores = null) {
                 if (localTime > remoteTime || localDoc.synced === false) {
                   try {
                     if (navigator.onLine && canWriteToCloud(storeName)) {
-                      if (storeName === "cms_content" && docId === "gallery_images") {
-                        await syncGalleryImagesToFirestore(localDoc);
-                      } else {
-                        await firestore.collection(storeName).doc(docId).set(localDoc);
-                      }
-                      localDoc.synced = true;
-                      await db.putLocal(storeName, localDoc);
+                      if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
                     }
                   } catch (e) {}
                 }
@@ -1874,6 +1865,7 @@ async function startFirestoreSync(specificStores = null) {
         }, err => {
           console.warn(`Firestore snapshot sync for ${storeName}:`, err);
         });
+          });
       }
     });
 
@@ -1916,5 +1908,13 @@ window.db = db;
 window.initDB = initDB;
 window.startFirestoreSync = startFirestoreSync;
 window.STORES_TO_SYNC = STORES_TO_SYNC;
+
+
+
+
+
+
+
+
 
 

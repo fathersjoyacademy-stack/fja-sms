@@ -1501,11 +1501,7 @@ const api = {
       };
     });
 
-    const netCharged = Math.max(0, totalCharged);
-    const netPaid = Math.max(0, totalPaid);
-    const netBadDebt = Math.max(0, totalBadDebt);
-    const netArrears = Math.max(0, netCharged - netPaid - netBadDebt);
-    const creditBalance = (netPaid + netBadDebt) > netCharged ? ((netPaid + netBadDebt) - netCharged) : 0;
+    const roundAmount = (val) => Math.round(val * 100) / 100; const netCharged = roundAmount(Math.max(0, totalCharged)); const netPaid = roundAmount(Math.max(0, totalPaid)); const netBadDebt = roundAmount(Math.max(0, totalBadDebt)); const netArrears = roundAmount(Math.max(0, netCharged - netPaid - netBadDebt)); const creditBalance = roundAmount((netPaid + netBadDebt) > netCharged ? ((netPaid + netBadDebt) - netCharged) : 0);
 
     return {
       totalCharged: netCharged,
@@ -1585,24 +1581,24 @@ const api = {
 
     // 2. Non-Tuition Operating Income
     const otherIncomesTx = filteredTx.filter(t => t.type === "OTHER_INCOME");
-    const otherIncome = otherIncomesTx.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    const otherIncome = Math.round(otherIncomesTx.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0) * 100) / 100;
 
     // 3. Gross Cash Inflows (Total Cash Collected)
-    const grossInflows = feesCollected + otherIncome;
+    feesCollected = Math.round(feesCollected * 100) / 100; const grossInflows = Math.round((feesCollected + otherIncome) * 100) / 100;
 
     // 4. Staff Payroll Net Disbursements
     const payrollTx = filteredTx.filter(t => t.type === "PAYROLL");
-    const totalPayroll = payrollTx.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    const totalPayroll = Math.round(payrollTx.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0) * 100) / 100;
 
     // 5. Operating & Operational Expenses
     const expenseTx = filteredTx.filter(t => t.type === "EXPENSE" || t.type === "OTHER_EXPENSE");
-    const totalExpenses = expenseTx.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    const totalExpenses = Math.round(expenseTx.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0) * 100) / 100;
 
     // 6. Total Cash Outflows
-    const totalOutflows = totalPayroll + totalExpenses;
+    const totalOutflows = Math.round((totalPayroll + totalExpenses) * 100) / 100;
 
     // 7. Net Operating Cash Flow Margins
-    const netCash = grossInflows - totalOutflows;
+    const netCash = Math.round((grossInflows - totalOutflows) * 100) / 100;
 
     // 8. Total Outstanding School Arrears (fees invoiced minus collected and written off bad debt)
     const totalArrears = Math.max(0, feesInvoiced - feesCollected - totalBadDebt);
@@ -2146,9 +2142,7 @@ const api = {
       const compositeAverage = subjectBreakdown.length > 0 ? parseFloat((totalMarks / subjectBreakdown.length).toFixed(2)) : 0;
       const overallScale = this.getGradeScale(compositeAverage);
 
-      // Calculate terminal attendance days (X out of Y days)
-      const allAttendance = await window.db.getAll("attendance") || [];
-      const studentAtt = allAttendance.filter(a => a.student_id === studentId || a.user_id === studentId);
+      // Calculate terminal attendance days (X out of Y days) const studentAtt = await window.db.queryByIndex("attendance", "user_id", studentId) || [];
       const presCount = studentAtt.filter(a => a.status === "PRESENT" || a.status === "LATE").length;
       let totalSchoolDays = studentAtt.length;
       
@@ -2274,22 +2268,7 @@ const api = {
       return { totalRecords: 0, presentCount: 0, lateCount: 0, absentCount: 0, excusedCount: 0, attendanceRate: 100, punctualityRate: 100, records: [] };
     }
     try {
-      const allAttendance = await window.db.getAll("attendance") || [];
-      const enrolments = classId ? await window.db.getAll("enrolments") || [] : [];
-      const users = role ? await window.db.getAll("users") || [] : [];
-      
-      let targetUserIds = null;
-      if (userId) {
-        targetUserIds = new Set([userId]);
-      } else if (classId) {
-        const classStudIds = enrolments.filter(e => e.class_id === classId).map(e => e.student_id);
-        targetUserIds = new Set(classStudIds);
-      } else if (role) {
-        const roleUserIds = users.filter(u => u.role === role && u.status === "ACTIVE").map(u => u.user_id);
-        targetUserIds = new Set(roleUserIds);
-      }
-      
-      const filtered = allAttendance.filter(a => {
+      const enrolments = classId ? await window.db.getAll("enrolments") || [] : []; const users = role ? await window.db.getAll("users") || [] : []; let targetUserIds = null; if (userId) { targetUserIds = new Set([userId]); } else if (classId) { const classStudIds = enrolments.filter(e => e.class_id === classId).map(e => e.student_id); targetUserIds = new Set(classStudIds); } else if (role) { const roleUserIds = users.filter(u => u.role === role && u.status === "ACTIVE").map(u => u.user_id); targetUserIds = new Set(roleUserIds); } let allAttendance = []; if (userId) { allAttendance = await window.db.queryByIndex("attendance", "user_id", userId) || []; } else { allAttendance = await window.db.getAll("attendance") || []; } const filtered = allAttendance.filter(a => {
         if (targetUserIds && !targetUserIds.has(a.user_id)) return false;
         if (startDate && a.date < startDate) return false;
         if (endDate && a.date > endDate) return false;
@@ -2334,12 +2313,7 @@ const api = {
   async getDailyAttendanceSummary(dateStr) {
     if (!window.db) return { student: { present: 0, total: 0, rate: 100 }, staff: { present: 0, total: 0, rate: 100 } };
     try {
-      const date = dateStr || new Date().toISOString().substring(0, 10);
-      const allAttendance = await window.db.getAll("attendance") || [];
-      const users = await window.db.getAll("users") || [];
-      
-      const userMap = new Map(users.map(u => [u.user_id, u]));
-      const dayRecords = allAttendance.filter(a => a.date === date);
+      const date = dateStr || new Date().toISOString().substring(0, 10); const dayRecords = await window.db.queryByIndex("attendance", "date", date) || []; const users = await window.db.getAll("users") || []; const userMap = new Map(users.map(u => [u.user_id, u]));
       
       let studTotal = 0, studPresent = 0;
       let staffTotal = 0, staffPresent = 0;
@@ -2524,4 +2498,11 @@ const api = {
 };
 
 window.api = api;
+
+
+
+
+
+
+
 

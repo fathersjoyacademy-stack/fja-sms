@@ -1,6 +1,13 @@
 // app.js - SPA Router, Event Controller, Landing UI & Dashboard Renderer
 
 // Global Session Variables
+window.escapeHTML = function(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[&<>'"]/g, function(tag) {
+    const chars = {'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'};
+    return chars[tag] || tag;
+  });
+};
 let currentUser = null;
 let currentToken = null;
 
@@ -8351,12 +8358,7 @@ async function renderTeacherPayslip(container) {
 // ==========================================
 async function renderTeacherDash(container) {
   try {
-    const attendance = await window.db.getAll("attendance");
-    const classes = await window.db.getAll("classes");
-    const myClass = classes.find(c => c.class_teacher_id === currentUser.user_id);
-    const myClassName = myClass ? myClass.class_name : "Unassigned Grade";
-    const teacherAttendance = attendance.filter(a => a.user_id === currentUser.user_id && a.status === "PRESENT");
-    const totalDays = attendance.filter(a => a.user_id === currentUser.user_id).length;
+    const attendance = await window.db.queryByIndex("attendance", "user_id", currentUser.user_id) || []; const classes = await window.db.getAll("classes"); const myClass = classes.find(c => c.class_teacher_id === currentUser.user_id); const myClassName = myClass ? myClass.class_name : "Unassigned Grade"; const teacherAttendance = attendance.filter(a => a.status === "PRESENT"); const totalDays = attendance.length;
     const ratio = totalDays > 0 ? ((teacherAttendance.length / totalDays) * 100).toFixed(0) : 100;
 
     container.innerHTML = `
@@ -8525,10 +8527,7 @@ async function renderTeacherAttendance(container) {
     const datePicker = document.getElementById("att-date-picker");
 
     async function loadAttendanceRoster() {
-      const dateStr = datePicker.value;
-      const attRecords = await window.db.getAll("attendance") || [];
-
-      if (studentRoster.length === 0) {
+      const dateStr = datePicker.value; const attRecords = await window.db.queryByIndex("attendance", "date", dateStr) || []; if (studentRoster.length === 0) {
         rosterRows.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--text-muted)">No active students currently enrolled in ${myClassName}.</td></tr>`;
         return;
       }
@@ -8760,8 +8759,17 @@ async function renderClassWall(container) {
         return;
       }
 
-      const esc = window.escapeHTML || (s => s);
-      feed.innerHTML = sorted.map(post => {
+              let focusedReplyId = null;
+        let focusedReplyValue = "";
+        if (document.activeElement && document.activeElement.classList.contains("reply-input-text")) {
+          const form = document.activeElement.closest("form");
+          if (form) {
+            focusedReplyId = form.getAttribute("data-post-id");
+            focusedReplyValue = document.activeElement.value;
+          }
+        }
+        const esc = window.escapeHTML || (s => s);
+        feed.innerHTML = sorted.map(post => {
         let replies = [];
         try {
           replies = typeof post.replies_json === "string" ? JSON.parse(post.replies_json || "[]") : (post.replies_json || []);
@@ -8872,7 +8880,18 @@ async function renderClassWall(container) {
     }
 
     // Register active wall refresh hook for real-time dbSyncUpdate
-    window._refreshActiveWall = loadWallThreads;
+            // Restore wall focus
+        if (focusedReplyId) {
+          const form = document.querySelector('.form-wall-reply[data-post-id="' + focusedReplyId + '"]');
+          if (form) {
+            const input = form.querySelector('.reply-input-text');
+            if (input) {
+              input.value = focusedReplyValue;
+              input.focus();
+            }
+          }
+        }
+      window._refreshActiveWall = loadWallThreads;
 
     // Hook Topic creation submit
     document.getElementById("form-wall-post").addEventListener("submit", async (e) => {
@@ -19484,7 +19503,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadDashboardSubview("notifications-portal");
   });
 
-  document.getElementById("btn-logout").addEventListener("click", () => {
+    document.getElementById("btn-logout").addEventListener("click", async () => {
+    // SECURITY PATCH: Prevent shared-device data leak by completely destroying the local offline database on logout
+    if (window.indexedDB) {
+      try {
+        const dReq = indexedDB.deleteDatabase("SchoolManagementDB");
+        dReq.onsuccess = () => console.log("Local offline database destroyed securely.");
+      } catch(e) {}
+    }
+    // Purge sync watermarks
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith("fja_last_sync_")) localStorage.removeItem(key);
+    });
+
     const prevUserId = currentUser ? currentUser.user_id : null;
     currentUser = null;
     currentToken = null;
@@ -20466,6 +20497,9 @@ async function renderPortalMessages(container) {
         (m.sender_id === user.user_id && m.recipient_id === selectedContact.user_id) ||
         (m.sender_id === selectedContact.user_id && m.recipient_id === user.user_id)
       ).sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+        const existingTextarea = document.getElementById("chat-compose-textarea");
+        const savedChatText = existingTextarea ? existingTextarea.value : "";
+        const isChatFocused = document.activeElement && document.activeElement.id === "chat-compose-textarea";
 
       chatPane.innerHTML = `
         <!-- Chat Header -->
@@ -20516,7 +20550,16 @@ async function renderPortalMessages(container) {
         </div>
       `;
 
-      // Bind Mobile Back Button
+              const newChatTextarea = document.getElementById("chat-compose-textarea");
+        if (newChatTextarea && savedChatText !== undefined) {
+          newChatTextarea.value = savedChatText;
+          if (isChatFocused) {
+            newChatTextarea.focus();
+            const len = newChatTextarea.value.length;
+            newChatTextarea.setSelectionRange(len, len);
+          }
+        }
+        // Bind Mobile Back Button
       const backBtn = document.getElementById("btn-mobile-chat-back");
       if (backBtn) {
         backBtn.addEventListener("click", () => {
@@ -20678,6 +20721,16 @@ window.addEventListener("popstate", (e) => {
     }
   }
 });
+
+
+
+
+
+
+
+
+
+
 
 
 
