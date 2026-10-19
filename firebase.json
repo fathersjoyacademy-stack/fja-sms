@@ -7,6 +7,7 @@
                       "source":  "functions"
                   },
     "hosting":  {
+                    "site": "fja-sms",
                     "public":  ".",
                     "ignore":  [
                                    "firebase.json",
