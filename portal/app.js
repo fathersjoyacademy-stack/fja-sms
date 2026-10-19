@@ -672,8 +672,8 @@ async function handlePublicAdmission(e) {
 async function handlePortalLogin(e) {
   e.preventDefault();
 
-  const uidOrPhone = document.getElementById("login-uid").value;
-  const password = document.getElementById("login-password").value;
+  const uidOrPhone = (document.getElementById("login-uid").value || "").trim();
+  const password = document.getElementById("login-password").value || "";
 
   if (!window.api) {
     showToast("Authentication API currently offline.", "danger");
@@ -710,6 +710,19 @@ async function handleForcedReset(e) {
     
     await window.db.put("users", currentUser);
     
+    // Synchronize password update with Firebase Auth if user is signed in
+    if (window.isFirebaseConfigured && window.isFirebaseConfigured() && window.firebase && window.firebase.auth) {
+      const fbUser = firebase.auth().currentUser;
+      if (fbUser && !fbUser.isAnonymous) {
+        try {
+          await fbUser.updatePassword(newPwd);
+          console.log("Firebase Auth password successfully updated.");
+        } catch (fbErr) {
+          console.warn("Firebase Auth updatePassword notice:", fbErr);
+        }
+      }
+    }
+
     // Update persisted user session
     localStorage.setItem("fja_session_user", JSON.stringify(currentUser));
     
@@ -19686,32 +19699,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
     document.getElementById("btn-logout").addEventListener("click", async () => {
-    // SECURITY PATCH: Prevent shared-device data leak by completely destroying the local offline database on logout
-    if (window.indexedDB) {
+    // 1. Sign out of Firebase Auth if active
+    if (window.firebase && window.firebase.auth) {
       try {
-        const dReq = indexedDB.deleteDatabase("SchoolManagementDB");
-        dReq.onsuccess = () => console.log("Local offline database destroyed securely.");
-      } catch(e) {}
+        await firebase.auth().signOut();
+      } catch (authErr) {
+        console.warn("Firebase signOut notice:", authErr);
+      }
     }
-    // Purge sync watermarks
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith("fja_last_sync_")) localStorage.removeItem(key);
-    });
 
+    // 2. Clear in-memory session
     const prevUserId = currentUser ? currentUser.user_id : null;
     currentUser = null;
     currentToken = null;
     if (window.api) {
       window.api.currentUser = null;
     }
+
+    // 3. Purge session tokens and sync watermarks from localStorage
     localStorage.removeItem("fja_session_token");
     localStorage.removeItem("fja_session_user");
     if (prevUserId) {
       localStorage.removeItem(`fja_last_view_${prevUserId}`);
     }
-    document.getElementById("form-portal-login").reset();
-    navigateTo("view-login");
-    showToast("Logged out successfully", "info");
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith("fja_last_sync_") || key.startsWith("fja_last_view_")) {
+        localStorage.removeItem(key);
+      }
+    });
+
+    // 4. Safely close active IndexedDB connection so database doesn't lock
+    if (window.db && typeof window.db.close === "function") {
+      try { window.db.close(); } catch(e) {}
+    }
+
+    // 5. Cleanly reload to view-login to reinitialize clean state without blocking
+    window.location.href = window.location.pathname;
   });
 
   const profPhotoInput = document.getElementById("prof-photo-file-input");

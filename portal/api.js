@@ -223,15 +223,47 @@ const api = {
     }
 
     try {
+      const cleanInput = (uidOrPhone || "").trim();
       const users = await window.db.getAll("users");
       // Search matching UID or primary Phone (supports Ghanaian normalized formats)
-      const normInput = this.normalizeGhanaPhone(uidOrPhone);
-      const matchingUsers = users.filter(u => u.status !== "ARCHIVED" && (
-        u.uid === uidOrPhone || 
-        u.phone === uidOrPhone || 
+      const normInput = this.normalizeGhanaPhone(cleanInput);
+      let matchingUsers = users.filter(u => u.status !== "ARCHIVED" && (
+        u.uid === cleanInput || 
+        u.phone === cleanInput || 
         (normInput && this.normalizeGhanaPhone(u.phone) === normInput)
       ));
       
+      // Cloud Fallback 1: If account not found in local IndexedDB, query Firestore directly
+      if (matchingUsers.length === 0 && window.isFirebaseConfigured && window.isFirebaseConfigured() && window.firebase && window.firebase.firestore) {
+        try {
+          if (typeof window.ensureFirebaseAuth === "function") {
+            await window.ensureFirebaseAuth();
+          }
+          const firestore = firebase.firestore();
+          // Look up by UID
+          let cloudSnap = await firestore.collection("users").where("uid", "==", cleanInput).get();
+          // Look up by exact phone
+          if (cloudSnap.empty) {
+            cloudSnap = await firestore.collection("users").where("phone", "==", cleanInput).get();
+          }
+          // Look up by normalized phone
+          if (cloudSnap.empty && normInput) {
+            cloudSnap = await firestore.collection("users").where("phone", "==", normInput).get();
+          }
+          if (!cloudSnap.empty) {
+            for (const doc of cloudSnap.docs) {
+              const uData = doc.data();
+              if (uData && uData.status !== "ARCHIVED") {
+                matchingUsers.push(uData);
+                await window.db.putLocal("users", uData).catch(() => {});
+              }
+            }
+          }
+        } catch (cloudFetchErr) {
+          console.warn("Direct Cloud Firestore user lookup notice:", cloudFetchErr);
+        }
+      }
+
       if (matchingUsers.length === 0) {
         return { success: false, message: "User account not found or disabled." };
       }
@@ -258,11 +290,52 @@ const api = {
       }
 
       // Check credentials locally
-      const isValidLocally = await this.checkPassword(password, user.password_hash, user.role, user.is_temporal_pwd);
+      let isValidLocally = await this.checkPassword(password, user.password_hash, user.role, user.is_temporal_pwd);
+
+      // Cloud Fallback 2: If local password check fails, check directly against latest Cloud Firestore document
+      // (Handles cases where password was updated/reset on another device or by admin)
+      if (!isValidLocally && window.isFirebaseConfigured && window.isFirebaseConfigured() && window.firebase && window.firebase.firestore) {
+        try {
+          if (typeof window.ensureFirebaseAuth === "function") {
+            await window.ensureFirebaseAuth();
+          }
+          const firestore = firebase.firestore();
+          const docId = user.user_id || user.uid;
+          let cloudDocSnap = null;
+          if (docId) {
+            cloudDocSnap = await firestore.collection("users").doc(docId).get();
+          }
+          if ((!cloudDocSnap || !cloudDocSnap.exists) && user.uid) {
+            const qSnap = await firestore.collection("users").where("uid", "==", user.uid).limit(1).get();
+            if (!qSnap.empty) cloudDocSnap = qSnap.docs[0];
+          }
+          if (cloudDocSnap && cloudDocSnap.exists) {
+            const freshCloudUser = cloudDocSnap.data();
+            const validInCloud = await this.checkPassword(password, freshCloudUser.password_hash, freshCloudUser.role, freshCloudUser.is_temporal_pwd);
+            if (validInCloud) {
+              user = freshCloudUser;
+              isValidLocally = true;
+              await window.db.putLocal("users", freshCloudUser).catch(() => {});
+              console.log("Stale local credentials successfully refreshed from Cloud Firestore.");
+            }
+          }
+        } catch (cloudRefreshErr) {
+          console.warn("Direct Cloud Firestore password verification notice:", cloudRefreshErr);
+        }
+      }
 
       // Check if Firebase is configured
       if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
-        try { const authEmail = `${user.uid}@fathersjoy.com`; const currentAnon = firebase.auth().currentUser; if (currentAnon && currentAnon.isAnonymous) { try { await currentAnon.delete(); } catch(e) {} } const authResult = await firebase.auth().signInWithEmailAndPassword(authEmail, password); const firebaseUser = authResult.user; console.log("Firebase Auth sign-in successful:", firebaseUser.uid); } catch (authErr) {
+        try {
+          const authEmail = `${user.uid}@fathersjoy.com`;
+          const currentAnon = firebase.auth().currentUser;
+          if (currentAnon && currentAnon.isAnonymous) {
+            try { await currentAnon.delete(); } catch(e) {}
+          }
+          const authResult = await firebase.auth().signInWithEmailAndPassword(authEmail, password);
+          const firebaseUser = authResult.user;
+          console.log("Firebase Auth sign-in successful:", firebaseUser.uid);
+        } catch (authErr) {
           // Auto-provision user in Firebase Auth if correct password entered locally
           if (isValidLocally) {
             try {
@@ -271,6 +344,10 @@ const api = {
               console.log("Firebase Auth auto-provisioning successful:", createResult.user.uid);
             } catch (createErr) {
               console.warn("Firebase Auth notice (continuing with local auth):", createErr.message);
+              // Ensure an active Firebase auth session exists so Firestore security rules don't block operations
+              if (!firebase.auth().currentUser && typeof window.ensureFirebaseAuth === "function") {
+                try { await window.ensureFirebaseAuth(); } catch (e) {}
+              }
             }
           } else {
             console.error("Firebase Auth sign-in failed:", authErr);

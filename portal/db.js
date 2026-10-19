@@ -715,6 +715,16 @@ const db = {
     });
   },
 
+  // Safely close the active IndexedDB connection
+  close() {
+    if (dbInstance) {
+      try {
+        dbInstance.close();
+      } catch (e) {}
+      dbInstance = null;
+    }
+  },
+
   // Purge legacy sample/demo CMS content from the LOCAL IndexedDB only.
   // Never writes to Firestore and never re-stamps updated_at, so a stale local copy can't overwrite newer cloud data.
   // Incoming cloud documents are cleaned separately by sanitizeIncomingDoc().
@@ -2053,6 +2063,7 @@ window.initDB = initDB;
 window.shouldKeepLocalDoc = shouldKeepLocalDoc;
 window.startFirestoreSync = startFirestoreSync;
 window.STORES_TO_SYNC = STORES_TO_SYNC;
+window.ensureFirebaseAuth = ensureFirebaseAuth;
 
 
 
