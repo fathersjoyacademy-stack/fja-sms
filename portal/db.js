@@ -634,7 +634,7 @@ const db = {
           if (storeName === "cms_content" && docId === "gallery_images" && typeof syncGalleryImagesToFirestore === "function") {
             await syncGalleryImagesToFirestore(obj);
           } else {
-            await firebase.firestore().collection(storeName).doc(docId).set(obj);
+            await firebase.firestore().collection(storeName).doc(docId).set(obj, { merge: true });
           }
         }
       } catch (err) {
@@ -1880,7 +1880,7 @@ async function startFirestoreSync(specificStores = null) {
                   if (localTime > remoteTime || localDoc.synced === false) {
                     try {
                       if (navigator.onLine && canWriteToCloud(storeName)) {
-                        if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
+                        if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc, { merge: true }); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
                       }
                     } catch (e) {
                       console.warn(`Upward sync push for ${storeName}/${docId} skipped:`, e);
@@ -1999,7 +1999,7 @@ async function startFirestoreSync(specificStores = null) {
               if (localTime > remoteTime || localDoc.synced === false) {
                 try {
                   if (navigator.onLine && canWriteToCloud(storeName)) {
-                    if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
+                    if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc, { merge: true }); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
                   }
                 } catch (e) {}
               }

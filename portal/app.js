@@ -262,6 +262,14 @@ async function updateOnlineStatus(isOnline) {
   }
 }
 
+// Active Academic Year Dynamic Resolver
+async function getActiveAcademicYear() {
+  if (window.api && typeof window.api.getActiveAcademicYear === "function") {
+    return await window.api.getActiveAcademicYear();
+  }
+  return "2026/2027";
+}
+
 // Generalized Offline Sync for all stores
 async function syncDirtyRecords() {
   if (!window.db) return;
@@ -3220,13 +3228,15 @@ async function renderAccountProvisioning(container) {
       // Enrol in Class
       if (classId) {
         const enrolmentId = "e-enrol-" + Date.now();
+        const activeYear = await getActiveAcademicYear();
         await window.db.put("enrolments", {
           enrolment_id: enrolmentId,
           student_id: newUser.user_id,
           class_id: classId,
-          academic_year: "2026/2027",
+          academic_year: activeYear,
           status: "ACTIVE",
           enrolled_at: new Date().toISOString().substring(0, 10),
+          promoted_year: activeYear,
           promoted_2026_2027: true
         });
       }
@@ -3435,13 +3445,15 @@ async function renderAccountProvisioning(container) {
 
             if (classId) {
               const enrolmentId = "e-enrol-" + Date.now();
+              const activeYear = await getActiveAcademicYear();
               await window.db.put("enrolments", {
                 enrolment_id: enrolmentId,
                 student_id: newUser.user_id,
                 class_id: classId,
-                academic_year: "2026/2027",
+                academic_year: activeYear,
                 status: "ACTIVE",
                 enrolled_at: new Date().toISOString().substring(0, 10),
+                promoted_year: activeYear,
                 promoted_2026_2027: true
               });
             }
@@ -6061,14 +6073,16 @@ async function renderAdmissionsIntake(container) {
 
           const enrolmentId = "e-enrol-" + Date.now();
           const transactionId = "t-invoice-" + Date.now();
+          const activeYear = await getActiveAcademicYear();
 
           const newEnrol = classId ? {
             enrolment_id: enrolmentId,
             student_id: student.user_id,
             class_id: classId,
-            academic_year: "2026/2027",
+            academic_year: activeYear,
             status: "ACTIVE",
             enrolled_at: new Date().toISOString().substring(0, 10),
+            promoted_year: activeYear,
             promoted_2026_2027: true
           } : null;
 
@@ -15840,10 +15854,12 @@ async function renderRecordsManagement(container) {
           const allEnrols = await window.db.getAll("enrolments");
           const studentEnrol = allEnrols.find(en => en.student_id === targetUserId);
           if (chosenClassId) {
+            const activeYear = await getActiveAcademicYear();
             if (studentEnrol) {
               studentEnrol.class_id = chosenClassId;
-              studentEnrol.academic_year = "2026/2027";
+              studentEnrol.academic_year = activeYear;
               studentEnrol.status = "ACTIVE";
+              studentEnrol.promoted_year = activeYear;
               studentEnrol.promoted_2026_2027 = true;
               await window.db.put("enrolments", studentEnrol);
             } else {
@@ -15851,9 +15867,10 @@ async function renderRecordsManagement(container) {
                 enrolment_id: "e-enrol-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
                 student_id: targetUserId,
                 class_id: chosenClassId,
-                academic_year: "2026/2027",
+                academic_year: activeYear,
                 term: "Term 1",
                 status: "ACTIVE",
+                promoted_year: activeYear,
                 promoted_2026_2027: true
               });
             }

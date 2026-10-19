@@ -7,9 +7,17 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Helper function to verify registered portal members
+    function isPortalMember() {
+      return isAuthenticated() && (
+        (request.auth.token.email != null && request.auth.token.email.matches('.*@fathersjoy[.]com')) ||
+        request.auth.token.firebase.sign_in_provider != 'anonymous'
+      );
+    }
+
     // Public Admissions Intake submissions
     match /users/{userId} {
-      allow create: if request.resource.data.status == 'PENDING';
+      allow create: if request.resource.data.status == 'PENDING' || isAuthenticated();
       allow read, write: if isAuthenticated();
     }
     match /profiles/{profileId} {
@@ -35,6 +43,20 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
 
+    // Tamper-proof audit logs: Append-only! No modification or deletion permitted
+    match /audit_logs/{auditId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // Central SMS logs: Append-only for auditing
+    match /sms_logs/{logId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
     // All operational and financial records require authenticated access
     match /classes/{classId} {
       allow read, write: if isAuthenticated();
@@ -46,10 +68,9 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
     match /financial_transactions/{txId} {
-      allow read, write: if isAuthenticated();
-    }
-    match /audit_logs/{auditId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isPortalMember();
     }
     match /attendance/{attendanceId} {
       allow read, write: if isAuthenticated();
@@ -58,7 +79,9 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
     match /student_scores/{scoreId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isPortalMember();
     }
     match /lesson_notes/{noteId} {
       allow read, write: if isAuthenticated();

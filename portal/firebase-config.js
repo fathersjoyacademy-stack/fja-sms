@@ -14,12 +14,9 @@ const firebaseConfig = {
 
 // Hubtel configuration (backend functions securely manage authentication and API secrets)
 const hubtelConfig = {
-  clientId: "cvnhobyo",
-  clientSecret: "rnrxvuxd",
   senderId: "FathersJoy",
   backendFunction: "sendSchoolSMS",
-  apiEndpoint: "https://us-central1-fja-sms.cloudfunctions.net/apiSendSMS",
-  directEndpoint: "https://sms.hubtel.com/v1/messages/send"
+  apiEndpoint: "https://us-central1-fja-sms.cloudfunctions.net/apiSendSMS"
 };
 
 // Helper flag to check if Firebase is configured

@@ -116,6 +116,14 @@ const api = {
     }
   },
 
+  async getActiveAcademicYear() {
+    try {
+      const term = await this.getCurrentTerm();
+      if (term && term.academicYear) return term.academicYear;
+    } catch (e) {}
+    return "2026/2027";
+  },
+
   async syncToFirebase(storeName, data) {
     if (window.isFirebaseConfigured && window.isFirebaseConfigured() && navigator.onLine) {
       try {
@@ -189,30 +197,48 @@ const api = {
     return false;
   },
 
-  // --- JWT Session Management (Base64 Claims) ---
+  // --- JWT Session Management (Base64 Claims with Unicode Support) ---
   generateJWT(userObj) {
     const claims = {
       user_id: userObj.user_id,
       uid: userObj.uid,
       role: userObj.role,
-      name: `${userObj.first_name} ${userObj.last_name}`,
-      phone: userObj.phone,
-      email: userObj.email,
+      name: `${userObj.first_name || ""} ${userObj.last_name || ""}`.trim(),
+      phone: userObj.phone || "",
+      email: userObj.email || "",
       exp: Date.now() + (24 * 60 * 60 * 1000) // 24 hour expiry
     };
-    return btoa(JSON.stringify(claims));
+    try {
+      return btoa(encodeURIComponent(JSON.stringify(claims)));
+    } catch (e) {
+      return btoa(unescape(encodeURIComponent(JSON.stringify(claims))));
+    }
   },
 
   decodeToken(token) {
+    if (!token) return null;
     try {
-      const claims = JSON.parse(atob(token));
+      let jsonStr;
+      try {
+        jsonStr = decodeURIComponent(atob(token));
+      } catch (e) {
+        jsonStr = decodeURIComponent(escape(atob(token)));
+      }
+      const claims = JSON.parse(jsonStr);
       if (Date.now() > claims.exp) {
         console.warn("Session token expired");
         return null;
       }
       return claims;
     } catch (e) {
-      return null;
+      // Backward compatibility for legacy tokens without encodeURIComponent
+      try {
+        const claims = JSON.parse(atob(token));
+        if (Date.now() > claims.exp) return null;
+        return claims;
+      } catch (legacyErr) {
+        return null;
+      }
     }
   },
 
@@ -865,27 +891,6 @@ const api = {
           }
         } catch (httpErr) {
           // Functions uninitialized or running in offline mode
-        }
-      }
-
-      if (!gatewayResult) {
-        try {
-          const cfg = (typeof window !== "undefined" && window.hubtelConfig) ? window.hubtelConfig : {};
-          const clientId = cfg.clientId || "cvnhobyo";
-          const clientSecret = cfg.clientSecret || "rnrxvuxd";
-          const from = cfg.senderId || "FathersJoy";
-          const endpoint = cfg.directEndpoint || "https://sms.hubtel.com/v1/messages/send";
-
-          const directUrl = `${endpoint}?clientsecret=${clientSecret}&clientid=${clientId}&from=${encodeURIComponent(from)}&to=${normalizedPhone}&content=${encodeURIComponent(message)}`;
-          
-          await fetch(directUrl, { mode: "no-cors", method: "GET" });
-          gatewayResult = {
-            success: true,
-            status: 0,
-            statusDescription: "Hubtel: Dispatched via Direct Gateway"
-          };
-        } catch (directErr) {
-          console.warn("Direct Hubtel Gateway dispatch notice:", directErr);
         }
       }
     }
