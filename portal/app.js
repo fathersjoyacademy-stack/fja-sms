@@ -955,6 +955,9 @@ async function loadDashboardSubview(subviewId, pushToHistory = true) {
   const container = document.getElementById("dashboard-subview-container");
   if (!container) return;
 
+  window.currentDashboardSubview = subviewId;
+  window.currentDashboardContainer = container;
+
   if (pushToHistory && window.history && window.history.pushState) {
     if (window.location.hash !== "#" + subviewId) {
       window.history.pushState({ subview: subviewId, portal: true }, "", "#" + subviewId);
@@ -6453,6 +6456,7 @@ async function renderAdmissionsIntake(container) {
         }
       });
     });
+    window._refreshAdmissionsIntake = () => renderAdmissionsIntake(container);
 
   } catch (err) {
     console.error("Admissions intake load error:", err);
@@ -6792,9 +6796,12 @@ async function renderFeeLedger(container) {
     async function loadLedgerList() {
       const searchVal = searchInput.value.toLowerCase();
       const txs = await window.db.getAll("financial_transactions");
+      const freshUsers = await window.db.getAll("users") || [];
+      const freshEnrolments = await window.db.getAll("enrolments") || [];
+      const activeStudents = freshUsers.filter(u => u.role === "Student" && u.status === "ACTIVE");
 
       // Update Grand Total KPI Summary Cards
-      const schoolMetrics = window.api.getFinancialMetrics(txs, "all", students);
+      const schoolMetrics = window.api.getFinancialMetrics(txs, "all", activeStudents.length > 0 ? activeStudents : students);
       const kpiCardsContainer = document.getElementById("fee-ledger-kpi-cards");
       if (kpiCardsContainer) {
         kpiCardsContainer.innerHTML = `
@@ -6826,16 +6833,19 @@ async function renderFeeLedger(container) {
       const classSortEl = document.getElementById("ledger-class-sort");
       let currentSort = classSortEl ? classSortEl.value : "class-asc";
 
-      let filtered = students.filter(s => {
+      const studentList = activeStudents.length > 0 ? activeStudents : students;
+      const enrolmentList = freshEnrolments.length > 0 ? freshEnrolments : enrolments;
+
+      let filtered = studentList.filter(s => {
         const fullName = formatFullName(s).toLowerCase();
         const matchesSearch = !searchVal || fullName.includes(searchVal) || (s.uid && s.uid.toLowerCase().includes(searchVal));
         if (!matchesSearch) return false;
 
         if (selectedClass === "unassigned") {
-          const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id);
+          const enroll = enrolmentList.find(e => e.student_id === s.user_id && e.class_id);
           if (enroll) return false;
         } else if (selectedClass) {
-          const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
+          const enroll = enrolmentList.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
           if (!enroll) return false;
         }
         return true;
@@ -7686,6 +7696,7 @@ async function renderFeeLedger(container) {
     }
 
     loadLedgerList();
+    window._refreshFeeLedger = loadLedgerList;
 
   } catch (err) {
     console.error("Fee ledger render failed:", err);
@@ -8228,6 +8239,7 @@ async function renderPayrollEngine(container) {
 
     loadActivePayroll();
     loadPayrollHistory();
+    window._refreshPayrollEngine = loadActivePayroll;
 
   } catch (err) {
     console.error("Payroll engine failed:", err);
@@ -8961,6 +8973,7 @@ async function renderTeacherAttendance(container) {
     }
 
     datePicker.addEventListener("change", loadAttendanceRoster);
+    window._refreshTeacherAttendance = loadAttendanceRoster;
 
     const saveBtn = document.getElementById("btn-save-student-attendance");
     if (saveBtn) {
@@ -9908,6 +9921,7 @@ async function renderLessonApprovals(container) {
     }
 
     loadApprovalsTable();
+    window._refreshLessonApprovals = loadApprovalsTable;
 
   } catch (err) {
     console.error("Lesson approvals view error:", err);
@@ -10622,6 +10636,15 @@ async function renderTeacherGrading(container) {
     }
 
     await renderStudentRosterForSubject(currentSubjectId);
+    window._refreshTeacherGrading = async () => {
+      if (currentSubjectId) {
+        const activeEl = document.activeElement;
+        const isTypingScore = activeEl && activeEl.classList && activeEl.classList.contains("score-input");
+        if (!isTypingScore) {
+          await renderStudentRosterForSubject(currentSubjectId);
+        }
+      }
+    };
 
   } catch (err) {
     console.error("Teacher grading view failed:", err);
@@ -13285,6 +13308,7 @@ async function renderAttendanceTracker(container) {
     endInput.addEventListener("change", processAttendance);
 
     processAttendance();
+    window._refreshAttendanceTracker = () => renderAttendanceTracker(container);
 
   } catch (err) {
     console.error("Attendance Tracker load error:", err);
@@ -17329,6 +17353,44 @@ if (btnCloseProfTop) {
   };
 }
 
+// Global Cross-Device Real-time Event Synchronizer Helpers
+const _syncRefreshDebounceMap = new Map();
+function debouncedSyncRefresh(key, fn, delay = 300) {
+  if (typeof fn !== "function") return;
+  if (_syncRefreshDebounceMap.has(key)) {
+    clearTimeout(_syncRefreshDebounceMap.get(key));
+  }
+  const timer = setTimeout(() => {
+    _syncRefreshDebounceMap.delete(key);
+    try {
+      fn();
+    } catch (err) {
+      console.warn(`Debounced sync refresh error for ${key}:`, err);
+    }
+  }, delay);
+  _syncRefreshDebounceMap.set(key, timer);
+}
+
+let _liveSubViewRefreshTimer = null;
+function refreshCurrentDashboardView(delay = 400) {
+  clearTimeout(_liveSubViewRefreshTimer);
+  _liveSubViewRefreshTimer = setTimeout(() => {
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.tagName === "SELECT" || activeEl.isContentEditable)) {
+      return;
+    }
+    const openModals = document.querySelectorAll(".portal-modal:not(.portal-hidden), [id$='-modal']:not(.portal-hidden)");
+    for (const m of openModals) {
+      if (m.offsetParent !== null && !m.classList.contains("portal-hidden")) {
+        return;
+      }
+    }
+    if (window.currentDashboardSubview && window.currentDashboardContainer && typeof loadDashboardSubview === "function") {
+      loadDashboardSubview(window.currentDashboardSubview, false);
+    }
+  }, delay);
+}
+
 // Global Cross-Device Real-time Event Synchronizer
 window.addEventListener("dbSyncUpdate", async (e) => {
   try {
@@ -17358,7 +17420,7 @@ window.addEventListener("dbSyncUpdate", async (e) => {
         await updateNotificationBadge();
       }
       if (typeof window._refreshNotificationsList === "function") {
-        window._refreshNotificationsList();
+        debouncedSyncRefresh("notifList", window._refreshNotificationsList, 200);
       }
     }
 
@@ -17368,48 +17430,119 @@ window.addEventListener("dbSyncUpdate", async (e) => {
         await updateNotificationBadge();
       }
       if (typeof window._refreshContactsList === "function") {
-        window._refreshContactsList();
+        debouncedSyncRefresh("chatContacts", window._refreshContactsList, 200);
       }
       if (typeof window._refreshActiveChatThread === "function") {
-        window._refreshActiveChatThread();
+        debouncedSyncRefresh("chatThread", window._refreshActiveChatThread, 150);
       }
     }
 
     // 4. Live Class Wall Discussion threads
     if (storeName === "class_posts") {
       if (typeof window._refreshActiveWall === "function") {
-        window._refreshActiveWall();
+        debouncedSyncRefresh("wall", window._refreshActiveWall, 250);
       }
     }
 
     // 5. Live Staff Task assignments
     if (storeName === "staff_tasks") {
       if (typeof window._refreshTasksList === "function") {
-        window._refreshTasksList();
+        debouncedSyncRefresh("tasks", window._refreshTasksList, 250);
       }
     }
 
     // 6. Live Users Directory / Account Provisioning
     if (storeName === "users" || storeName === "profiles") {
       if (typeof window._refreshUsersDirectory === "function") {
-        window._refreshUsersDirectory();
+        debouncedSyncRefresh("usersDir", window._refreshUsersDirectory, 300);
+      }
+      if (typeof window._refreshAdmissionsIntake === "function") {
+        debouncedSyncRefresh("admissions", window._refreshAdmissionsIntake, 300);
+      }
+      if (["proprietor-records-overview", "records-dashboard", "records-management"].includes(window.currentDashboardSubview)) {
+        refreshCurrentDashboardView(400);
       }
     }
 
     // 7. Live Academic Calendar & Events
     if (storeName === "academic_calendar") {
       if (typeof window._refreshAcademicCalendar === "function") {
-        window._refreshAcademicCalendar();
+        debouncedSyncRefresh("calendar", window._refreshAcademicCalendar, 200);
       }
     }
 
     // 8. Live Website CMS & Announcements
     if (storeName === "cms_content") {
       if (typeof window._refreshCMSAnnouncements === "function") {
-        window._refreshCMSAnnouncements();
+        debouncedSyncRefresh("cmsAnnounce", window._refreshCMSAnnouncements, 250);
       }
       if (typeof window._refreshCMSThumbnails === "function") {
-        window._refreshCMSThumbnails();
+        debouncedSyncRefresh("cmsThumbs", window._refreshCMSThumbnails, 250);
+      }
+    }
+
+    // 9. Live Fee Ledger, Payments & Payroll
+    if (storeName === "financial_transactions" || storeName === "fee_bills") {
+      if (typeof window._refreshFeeLedger === "function") {
+        debouncedSyncRefresh("feeLedger", window._refreshFeeLedger, 300);
+      }
+      if (typeof window._refreshPayrollEngine === "function") {
+        debouncedSyncRefresh("payroll", window._refreshPayrollEngine, 300);
+      }
+      if (typeof window._refreshFinanceAccounts === "function") {
+        debouncedSyncRefresh("financeAccounts", window._refreshFinanceAccounts, 300);
+      }
+      if (["proprietor-finance-overview", "finance-dash", "proprietor-dash"].includes(window.currentDashboardSubview)) {
+        refreshCurrentDashboardView(350);
+      }
+    }
+
+    // 10. Live Attendance Registers & Daily Summaries
+    if (storeName === "attendance") {
+      if (typeof window._refreshTeacherAttendance === "function") {
+        debouncedSyncRefresh("teacherAtt", window._refreshTeacherAttendance, 300);
+      }
+      if (typeof window._refreshAttendanceTracker === "function") {
+        debouncedSyncRefresh("attTracker", window._refreshAttendanceTracker, 300);
+      }
+      if (["headteacher-dash", "teacher-dash", "proprietor-dash"].includes(window.currentDashboardSubview)) {
+        refreshCurrentDashboardView(350);
+      }
+    }
+
+    // 11. Live Student Continuous Assessments & Terminal Scores
+    if (storeName === "student_scores") {
+      if (typeof window._refreshTeacherGrading === "function") {
+        debouncedSyncRefresh("teacherGrading", window._refreshTeacherGrading, 350);
+      }
+      if (["proprietor-academic-overview", "headteacher-dash", "student-dash", "parent-dash"].includes(window.currentDashboardSubview)) {
+        refreshCurrentDashboardView(400);
+      }
+    }
+
+    // 12. Live Class Management & Enrolments
+    if (storeName === "classes" || storeName === "enrolments") {
+      if (typeof window._refreshFeeLedger === "function") {
+        debouncedSyncRefresh("feeLedger", window._refreshFeeLedger, 300);
+      }
+      if (typeof window._refreshTeacherAttendance === "function") {
+        debouncedSyncRefresh("teacherAtt", window._refreshTeacherAttendance, 300);
+      }
+      if (typeof window._refreshTeacherGrading === "function") {
+        debouncedSyncRefresh("teacherGrading", window._refreshTeacherGrading, 350);
+      }
+      if (typeof window._refreshUsersDirectory === "function") {
+        debouncedSyncRefresh("usersDir", window._refreshUsersDirectory, 300);
+      }
+      if (["proprietor-records-overview", "records-dashboard", "records-management"].includes(window.currentDashboardSubview)) {
+        refreshCurrentDashboardView(400);
+      }
+    }
+
+    // 13. Live Lesson Notes & Supervisory Approvals
+    if (storeName === "lesson_notes") {
+      if (typeof window._refreshLessonApprovals === "function") {
+        debouncedSyncRefresh("lessonApprovals", window._refreshLessonApprovals, 300);
       }
     }
   } catch (syncErr) {
@@ -20082,6 +20215,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     // 4. Safely close active IndexedDB connection so database doesn't lock
     if (window.db && typeof window.db.close === "function") {
       try { window.db.close(); } catch(e) {}
+    }
+    if (typeof window.clearAllFirestoreListeners === "function") {
+      try { window.clearAllFirestoreListeners(); } catch(e) {}
     }
 
     // 5. Cleanly reload to view-login to reinitialize clean state without blocking

@@ -1708,17 +1708,15 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
   const localTime = getDocTimestamp(localDoc);
   const remoteTime = getDocTimestamp(remoteDoc);
 
-  // 2. Strict timestamp comparison
-  if (localTime > remoteTime) {
-    return true; // Local is strictly newer
-  }
-  if (remoteTime > localTime) {
+  // 2. Timestamp & clock-skew comparison
+  // If remote document is newer, equal, or within a 2-second device clock skew buffer:
+  if (remoteTime >= localTime - 2000) {
     // Edge case safety: protect user-populated data against blank/empty remote overwrites
     if (storeName === "cms_content") {
       try {
         if (docId === "gallery_images" || docId === "gallery_albums" || docId === "news_feed") {
           const localVal = localDoc.value ? JSON.parse(localDoc.value) : [];
-          const remoteVal = remoteDoc.value ? JSON.parse(remoteDoc.value) : [];
+          const remoteVal = remoteDoc.value ? JSON.parse(remoteVal) : [];
           if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
             return true;
           }
@@ -1732,32 +1730,11 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
       if (localDoc.canonical_terms && !remoteDoc.canonical_terms && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
       if (Array.isArray(localDoc.events) && localDoc.events.length > 0 && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
     }
-    return false; // Remote is genuinely newer and non-empty
+    return false; // Remote is genuinely newer or equivalent, and non-empty
   }
 
-  // 3. Timestamps are equal (or both 0):
-  // Check if remote is empty or missing data that local has
-  if (storeName === "cms_content") {
-    try {
-      if (docId === "gallery_images" || docId === "gallery_albums" || docId === "news_feed") {
-        const localVal = localDoc.value ? JSON.parse(localDoc.value) : [];
-        const remoteVal = remoteDoc.value ? JSON.parse(remoteDoc.value) : [];
-        if (Array.isArray(localVal) && localVal.length > 0 && Array.isArray(remoteVal) && remoteVal.length === 0) {
-          return true;
-        }
-      } else if (typeof localDoc.value === "string" && localDoc.value.trim().length > 0) {
-        if (!remoteDoc.value || remoteDoc.value.trim().length === 0) {
-          return true;
-        }
-      }
-    } catch (e) {}
-  } else if (storeName === "academic_calendar" && docId === "main-calendar") {
-    if (localDoc.canonical_terms && !remoteDoc.canonical_terms && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
-    if (Array.isArray(localDoc.events) && localDoc.events.length > 0 && (!Array.isArray(remoteDoc.events) || remoteDoc.events.length === 0)) return true;
-  }
-
-  // If local has timestamp > 0, preserve local
-  return localTime > 0;
+  // 3. Local is genuinely newer by more than 2 seconds
+  return true;
 }
 
 // Sanitize incoming Firestore documents to scrub legacy sample announcements and events
@@ -1835,6 +1812,22 @@ function sanitizeIncomingDoc(storeName, docId, docData) {
   return docData;
 }
 
+// Active Firestore Unsubscribe Tracker to prevent duplicate listeners
+const activeFirestoreUnsubscribes = {};
+
+function clearAllFirestoreListeners() {
+  Object.keys(activeFirestoreUnsubscribes).forEach(storeName => {
+    if (Array.isArray(activeFirestoreUnsubscribes[storeName])) {
+      activeFirestoreUnsubscribes[storeName].forEach(unsub => {
+        try { if (typeof unsub === "function") unsub(); } catch (e) {}
+      });
+    }
+  });
+  for (const k in activeFirestoreUnsubscribes) {
+    delete activeFirestoreUnsubscribes[k];
+  }
+}
+
 async function startFirestoreSync(specificStores = null) {
   if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) {
     console.log("Firebase not configured - running in local-only Mode.");
@@ -1858,6 +1851,16 @@ async function startFirestoreSync(specificStores = null) {
         }
       }
 
+      // Cleanly teardown any prior listener for this store to prevent duplicate listener accumulation
+      if (activeFirestoreUnsubscribes[storeName]) {
+        activeFirestoreUnsubscribes[storeName].forEach(unsub => {
+          try { if (typeof unsub === "function") unsub(); } catch (e) {}
+        });
+        activeFirestoreUnsubscribes[storeName] = [];
+      } else {
+        activeFirestoreUnsubscribes[storeName] = [];
+      }
+
       const lastSyncKey = `fja_last_sync_${storeName}`;
       const lastSync = localStorage.getItem(lastSyncKey);
 
@@ -1874,13 +1877,22 @@ async function startFirestoreSync(specificStores = null) {
               if (docId) {
                 const localDoc = await db.get(storeName, docId);
                 if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
-                  // Local record is newer or protected: keep local data and heal cloud if online
-                  const localTime = getDocTimestamp(localDoc);
-                  const remoteTime = getDocTimestamp(resolvedDocData);
-                  if (localTime > remoteTime || localDoc.synced === false) {
+                  // Only push upward if localDoc has unsaved offline changes (synced === false)
+                  if (localDoc && localDoc.synced === false) {
                     try {
                       if (navigator.onLine && canWriteToCloud(storeName)) {
-                        if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc, { merge: true }); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
+                        if (localDoc.is_deleted === true) {
+                          await firestore.collection(storeName).doc(docId).delete();
+                          await db.deleteLocal(storeName, docId);
+                        } else {
+                          if (storeName === "cms_content" && docId === "gallery_images") {
+                            await syncGalleryImagesToFirestore(localDoc);
+                          } else {
+                            await firestore.collection(storeName).doc(docId).set(localDoc, { merge: true });
+                          }
+                          localDoc.synced = true;
+                          await db.putLocal(storeName, localDoc);
+                        }
                       }
                     } catch (e) {
                       console.warn(`Upward sync push for ${storeName}/${docId} skipped:`, e);
@@ -1914,16 +1926,23 @@ async function startFirestoreSync(specificStores = null) {
             initialQuery = initialQuery.where("student_id", "==", myId);
           } else if (storeName === "attendance") {
             initialQuery = initialQuery.where("user_id", "==", myId);
-          } else if (["audit_logs", "staff_tasks", "bank_reconciliations", "data_change_requests", "pickup_guardians"].includes(storeName)) {
-            // Students have absolutely no business syncing these
+          } else if (["users", "profiles"].includes(storeName)) {
+            initialQuery = initialQuery.where("user_id", "==", myId);
+          } else if (["audit_logs", "staff_tasks", "bank_reconciliations", "data_change_requests", "pickup_guardians", "lesson_notes", "broadcast_requests"].includes(storeName)) {
             return;
           }
         }
       }
       // --------------------------------
 
+      // 5-minute safety buffer for clock skew and network latency
       if (lastSync && storeName !== "academic_calendar") {
-        initialQuery = initialQuery.where("updated_at", ">", lastSync);
+        const safetyBufferMs = 5 * 60 * 1000;
+        const lastSyncMs = new Date(lastSync).getTime();
+        const bufferedSyncTime = (!isNaN(lastSyncMs) && lastSyncMs > safetyBufferMs)
+          ? new Date(lastSyncMs - safetyBufferMs).toISOString()
+          : lastSync;
+        initialQuery = initialQuery.where("updated_at", ">", bufferedSyncTime);
       }
 
       initialQuery.get().then(async snapshot => {
@@ -1958,74 +1977,137 @@ async function startFirestoreSync(specificStores = null) {
         firestore.collection(storeName).get().then(ingestBatch).catch(e => console.warn(`Full pull fallback for ${storeName} skipped:`, e));
       });
 
-      // 2. Real-time multi-device listener (Restricted to save Firebase read costs)
-      const REALTIME_STORES = ["portal_messages", "notifications", "broadcast_requests", "cms_content", "academic_calendar"];
+      // 2. Real-time multi-device listener across all core operational stores
+      const REALTIME_STORES = [
+        "portal_messages",
+        "notifications",
+        "notification_user_reads",
+        "broadcast_requests",
+        "cms_content",
+        "academic_calendar",
+        "financial_transactions",
+        "attendance",
+        "student_scores",
+        "users",
+        "profiles",
+        "classes",
+        "enrolments",
+        "class_posts",
+        "staff_tasks",
+        "lesson_notes",
+        "assignments",
+        "data_change_requests",
+        "parent_profiles",
+        "parent_student_relations"
+      ];
+
       if (REALTIME_STORES.includes(storeName)) {
         let queries = [];
         if (window.currentUser) {
           const role = window.currentUser.role;
           const myId = window.currentUser.user_id;
           
-          if (storeName === "portal_messages") {
-             queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
-             queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
-          } else if (storeName === "notifications") {
-             queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
-             queries.push(firestore.collection(storeName).where("role", "==", role));
-             queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
-          } else if (storeName === "broadcast_requests" && (role === "Teacher" || role === "SectionalHead")) {
-             queries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
+          if (role === "Student") {
+            if (["student_scores", "financial_transactions", "enrolments"].includes(storeName)) {
+              queries.push(firestore.collection(storeName).where("student_id", "==", myId));
+            } else if (storeName === "attendance") {
+              queries.push(firestore.collection(storeName).where("user_id", "==", myId));
+            } else if (storeName === "users" || storeName === "profiles") {
+              queries.push(firestore.collection(storeName).where("user_id", "==", myId));
+            } else if (storeName === "portal_messages") {
+              queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+              queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+            } else if (storeName === "notifications") {
+              queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+              queries.push(firestore.collection(storeName).where("role", "==", role));
+              queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+            } else if (["classes", "assignments", "class_posts", "cms_content", "academic_calendar"].includes(storeName)) {
+              queries.push(firestore.collection(storeName));
+            }
+          } else if (role === "Parent") {
+            if (storeName === "portal_messages") {
+              queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+              queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+            } else if (storeName === "notifications") {
+              queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+              queries.push(firestore.collection(storeName).where("role", "==", role));
+              queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+            } else {
+              queries.push(firestore.collection(storeName));
+            }
           } else {
-             queries.push(firestore.collection(storeName));
+            // Staff, Teacher, SectionalHead, Finance, Admin, HeadTeacher, Proprietor
+            if (storeName === "portal_messages") {
+              queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+              queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+            } else if (storeName === "notifications") {
+              queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+              queries.push(firestore.collection(storeName).where("role", "==", role));
+              queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+            } else if (storeName === "broadcast_requests" && (role === "Teacher" || role === "SectionalHead")) {
+              queries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
+            } else {
+              queries.push(firestore.collection(storeName));
+            }
           }
         } else {
           queries.push(firestore.collection(storeName));
         }
 
         queries.forEach(q => {
-          q.onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(async (change) => {
-          const docData = change.doc.data();
-          if (change.type === "added" || change.type === "modified") {
-            let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
-            const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
-            resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
-            if (!resolvedDocData) return;
-            const localDoc = await db.get(storeName, docId);
-            if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
-              // Local is newer or protected; heal cloud if local is strictly newer or pending
-              const localTime = getDocTimestamp(localDoc);
-              const remoteTime = getDocTimestamp(resolvedDocData);
-              if (localTime > remoteTime || localDoc.synced === false) {
-                try {
-                  if (navigator.onLine && canWriteToCloud(storeName)) {
-                    if (localDoc.is_deleted === true) { await firestore.collection(storeName).doc(docId).delete(); await db.deleteLocal(storeName, docId); } else { if (storeName === "cms_content" && docId === "gallery_images") { await syncGalleryImagesToFirestore(localDoc); } else { await firestore.collection(storeName).doc(docId).set(localDoc, { merge: true }); } localDoc.synced = true; await db.putLocal(storeName, localDoc); }
+          const unsub = q.onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(async (change) => {
+              const docData = change.doc.data();
+              if (change.type === "added" || change.type === "modified") {
+                let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
+                const docId = change.doc.id || db.getDocId(storeName, resolvedDocData);
+                resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
+                if (!resolvedDocData) return;
+                const localDoc = await db.get(storeName, docId);
+                if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
+                  // Only push upward if localDoc has unsaved offline changes (synced === false)
+                  if (localDoc && localDoc.synced === false) {
+                    try {
+                      if (navigator.onLine && canWriteToCloud(storeName)) {
+                        if (localDoc.is_deleted === true) {
+                          await firestore.collection(storeName).doc(docId).delete();
+                          await db.deleteLocal(storeName, docId);
+                        } else {
+                          if (storeName === "cms_content" && docId === "gallery_images") {
+                            await syncGalleryImagesToFirestore(localDoc);
+                          } else {
+                            await firestore.collection(storeName).doc(docId).set(localDoc, { merge: true });
+                          }
+                          localDoc.synced = true;
+                          await db.putLocal(storeName, localDoc);
+                        }
+                      }
+                    } catch (e) {}
                   }
-                } catch (e) {}
+                  return;
+                }
+                await db.putLocal(storeName, resolvedDocData);
+                const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
+                window.dispatchEvent(event);
+              } else if (change.type === "removed") {
+                const docId = change.doc.id;
+                await db.deleteLocal(storeName, docId);
+                const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
+                window.dispatchEvent(event);
               }
-              return;
-            }
-            await db.putLocal(storeName, resolvedDocData);
-            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } });
-            window.dispatchEvent(event);
-          } else if (change.type === "removed") {
-            const docId = change.doc.id;
-            await db.deleteLocal(storeName, docId);
-            const event = new CustomEvent("dbSyncUpdate", { detail: { storeName, docId, deleted: true } });
-            window.dispatchEvent(event);
-          }
-        });
-        localStorage.setItem(lastSyncKey, new Date().toISOString());
-      }, err => {
-        console.warn(`Firestore snapshot sync for ${storeName}:`, err);
-      });
+            });
+            localStorage.setItem(lastSyncKey, new Date().toISOString());
+          }, err => {
+            console.warn(`Firestore snapshot sync for ${storeName}:`, err);
+          });
+          activeFirestoreUnsubscribes[storeName].push(unsub);
         });
       }
     });
 
     // Real-time listener for gallery chunk updates across clients
     try {
-      firestore.collection("cms_gallery_chunks").onSnapshot(async (snapshot) => {
+      const unsubChunks = firestore.collection("cms_gallery_chunks").onSnapshot(async (snapshot) => {
         if (!snapshot.empty) {
           const galleryMeta = await db.get("cms_content", "gallery_images");
           const assembled = await assembleFirestoreDoc("cms_content", { ...(galleryMeta || {}), content_key: "gallery_images", is_chunked: true });
@@ -2038,6 +2120,10 @@ async function startFirestoreSync(specificStores = null) {
       }, err => {
         console.warn("Gallery chunks snapshot sync notice:", err);
       });
+      if (!activeFirestoreUnsubscribes["cms_gallery_chunks"]) {
+        activeFirestoreUnsubscribes["cms_gallery_chunks"] = [];
+      }
+      activeFirestoreUnsubscribes["cms_gallery_chunks"].push(unsubChunks);
     } catch (e) {}
   } catch (err) {
     console.error("Failed to initialize Firebase database sync:", err);
@@ -2057,6 +2143,55 @@ seedMockData()
   })
   .catch(err => console.error("Initial seed/sync execution error:", err));
 
+// Cross-device live reconnection & safety focus sync
+let lastFocusSyncTime = 0;
+async function triggerFastSafetySync() {
+  const now = Date.now();
+  if (now - lastFocusSyncTime < 10000) return; // 10s debounce
+  lastFocusSyncTime = now;
+
+  if (!navigator.onLine) return;
+  if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) return;
+
+  try {
+    if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && firebase.firestore) {
+      try {
+        await firebase.firestore().enableNetwork();
+      } catch (e) {}
+    }
+    if (typeof window.startFirestoreSync === "function") {
+      const activeStores = window.currentUser
+        ? (window.STORES_TO_SYNC || null)
+        : ["cms_content", "academic_calendar", "gallery_albums", "gallery_images"];
+      window.startFirestoreSync(activeStores);
+    }
+    if (typeof window.syncDirtyRecords === "function") {
+      await window.syncDirtyRecords();
+    }
+  } catch (err) {
+    console.warn("Fast safety sync notice:", err);
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      triggerFastSafetySync();
+    }
+  });
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", triggerFastSafetySync);
+  window.addEventListener("online", triggerFastSafetySync);
+
+  // Background Heartbeat: runs every 45s while active to ensure zero stale data
+  setInterval(() => {
+    if (document.visibilityState === "visible" && navigator.onLine && window.currentUser) {
+      triggerFastSafetySync();
+    }
+  }, 45000);
+}
+
 // Export objects
 window.db = db;
 window.initDB = initDB;
@@ -2064,13 +2199,5 @@ window.shouldKeepLocalDoc = shouldKeepLocalDoc;
 window.startFirestoreSync = startFirestoreSync;
 window.STORES_TO_SYNC = STORES_TO_SYNC;
 window.ensureFirebaseAuth = ensureFirebaseAuth;
-
-
-
-
-
-
-
-
-
-
+window.clearAllFirestoreListeners = clearAllFirestoreListeners;
+window.triggerFastSafetySync = triggerFastSafetySync;
