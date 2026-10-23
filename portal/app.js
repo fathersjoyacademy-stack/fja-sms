@@ -8,6 +8,21 @@ window.escapeHTML = function(str) {
     return chars[tag] || tag;
   });
 };
+// Centralized Full Name Formatter with complete middle name (other_name) support
+function formatFullName(user) {
+  if (!user) return "";
+  if (typeof user === "string") return user.trim();
+  const first = (user.first_name || "").trim();
+  const middle = (user.other_name || user.other_names || user.middle_name || "").trim();
+  const last = (user.last_name || "").trim();
+  const parts = [first, middle, last].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(" ");
+  }
+  return (user.name || user.full_name || user.uid || "").trim();
+}
+window.formatFullName = formatFullName;
+
 let currentUser = null;
 let currentToken = null;
 
@@ -776,7 +791,7 @@ async function enterDashboardPortal() {
   const avatarImg = document.getElementById("header-avatar");
   const nameSpan = document.getElementById("header-user-name");
   if (nameSpan) {
-    nameSpan.innerHTML = `<span class="header-welcome-prefix">Welcome, </span><span class="header-user-fullname">${currentUser.first_name} ${currentUser.last_name}</span> <span class="header-user-role-badge">(${currentUser.role})</span>`;
+    nameSpan.innerHTML = `<span class="header-welcome-prefix">Welcome, </span><span class="header-user-fullname">${formatFullName(currentUser)}</span> <span class="header-user-role-badge">(${currentUser.role})</span>`;
   }
   if (avatarImg) {
     const profiles = await window.db.getAll("profiles");
@@ -1266,8 +1281,23 @@ async function renderProprietorCashflowTab(container) {
 async function renderProprietorPayrollTab(container) {
   try {
     const users = await window.db.getAll("users");
-    const staff = users.filter(u => u.role !== "Student" && u.role !== "Parent" && u.status === "ACTIVE");
+    const classes = await window.db.getAll("classes");
     const profiles = await window.db.getAll("profiles");
+
+    function sortStaffByClassRank(staffList) {
+      return [...staffList].sort((a, b) => {
+        const tClassesA = classes.filter(c => c.class_teacher_id === a.user_id);
+        const tClassesB = classes.filter(c => c.class_teacher_id === b.user_id);
+        const clsA = tClassesA[0];
+        const clsB = tClassesB[0];
+        const rankA = clsA ? getEduClassRank(clsA.class_name) : (a.role === "Teacher" ? 800 : (a.role === "SectionalHead" ? 850 : 900));
+        const rankB = clsB ? getEduClassRank(clsB.class_name) : (b.role === "Teacher" ? 800 : (b.role === "SectionalHead" ? 850 : 900));
+        if (rankA !== rankB) return rankA - rankB;
+        return formatFullName(a).localeCompare(formatFullName(b));
+      });
+    }
+
+    const staff = sortStaffByClassRank(users.filter(u => u.role !== "Student" && u.role !== "Parent" && u.status === "ACTIVE"));
 
     container.innerHTML = `
       <div id="payroll-history-export-container" style="display:flex; flex-direction:column; gap:2rem;">
@@ -1346,7 +1376,7 @@ async function renderProprietorPayrollTab(container) {
         return `
           <tr>
             <td><strong>${member.uid}</strong></td>
-            <td>${member.first_name} ${member.last_name}</td>
+            <td>${formatFullName(member)}</td>
             <td><span class="badge badge-info">${member.role}</span></td>
             <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
             <td>GH¢ ${profile.allowances.toFixed(2)}</td>
@@ -1400,7 +1430,7 @@ async function renderProprietorPayrollTab(container) {
 
         <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:1.5rem; border-bottom:1px dashed #ccc; padding-bottom:1rem;">
           <div>
-            <div><strong>Staff Member:</strong> ${member.first_name} ${member.last_name}</div>
+            <div><strong>Staff Member:</strong> ${formatFullName(member)}</div>
             <div><strong>Roster UID:</strong> ${member.uid}</div>
             <div><strong>Role Scope:</strong> ${member.role}</div>
           </div>
@@ -1800,7 +1830,7 @@ async function renderProprietorDash(container) {
 
     // Populate active staff dropdown in task modal
     const taskAssigneeSel = document.getElementById("task-input-assignee");
-    taskAssigneeSel.innerHTML = activeStaffList.map(s => `<option value="${s.user_id}">${s.first_name} ${s.last_name} (${s.role})</option>`).join("");
+    taskAssigneeSel.innerHTML = activeStaffList.map(s => `<option value="${s.user_id}">${formatFullName(s)} (${s.role})</option>`).join("");
 
     // Load and render staff tasks
     async function loadStaffTasks() {
@@ -1845,7 +1875,7 @@ async function renderProprietorDash(container) {
                 role: "Proprietor",
                 target_user_id: task.assigner_id,
                 title: "Task Completed",
-                message: `Staff ${currentUser.first_name} ${currentUser.last_name} completed task: "${task.description}"`,
+                message: `Staff ${formatFullName(currentUser)} completed task: "${task.description}"`,
                 target_view: "proprietor-dash",
                 status: "UNREAD",
                 created_at: new Date().toISOString()
@@ -1902,7 +1932,7 @@ async function renderProprietorDash(container) {
       const assigneeId = document.getElementById("task-input-assignee").value;
 
       const assigneeUser = await window.db.get("users", assigneeId);
-      const assigneeName = assigneeUser ? `${assigneeUser.first_name} ${assigneeUser.last_name}` : "Unknown Staff";
+      const assigneeName = assigneeUser ? formatFullName(assigneeUser) : "Unknown Staff";
 
       const currentUser = window.api.getCurrentUser();
       const creatorId = currentUser ? currentUser.user_id : "u-proprietor-1";
@@ -2015,7 +2045,7 @@ async function renderHeadTeacherDash(container) {
               <div class="form-group">
                 <label class="form-label">Select Staff Target</label>
                 <select id="task-staff-target" class="form-control" required>
-                  ${teachers.map(t => `<option value="${t.user_id}">${t.first_name} ${t.last_name}</option>`).join("")}
+                  ${teachers.map(t => `<option value="${t.user_id}">${formatFullName(t)}</option>`).join("")}
                 </select>
               </div>
               <div class="form-group">
@@ -2088,7 +2118,7 @@ async function renderHeadTeacherDash(container) {
       const targetId = document.getElementById("task-staff-target").value;
 
       const targetUser = await window.db.get("users", targetId);
-      const targetName = targetUser ? `${targetUser.first_name} ${targetUser.last_name}` : "Unknown Staff";
+      const targetName = targetUser ? formatFullName(targetUser) : "Unknown Staff";
       
       const currentUser = window.api.getCurrentUser();
       const taskId = "task-" + Date.now();
@@ -2285,7 +2315,7 @@ async function renderFinanceDash(container) {
                   role: assigner.role,
                   target_user_id: task.assigner_id,
                   title: "Task Completed",
-                  message: `Staff ${currentUser.first_name} ${currentUser.last_name} completed task: "${task.description}"`,
+                  message: `Staff ${formatFullName(currentUser)} completed task: "${task.description}"`,
                   target_view: assigner.role === "Proprietor" ? "proprietor-dash" : "headteacher-dash",
                   status: "UNREAD",
                   created_at: new Date().toISOString()
@@ -2508,6 +2538,7 @@ async function renderAccountProvisioning(container) {
                 <div class="form-group">
                   <label class="form-label">Select Staff Role</label>
                   <select id="staff-role" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
+                    <option value="Proprietor">Proprietor</option>
                     <option value="HeadTeacher">Head Teacher</option>
                     <option value="Admin">Administrator</option>
                     <option value="Finance">Finance Officer</option>
@@ -2670,14 +2701,30 @@ async function renderAccountProvisioning(container) {
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
           <h3>Registered Users Directory</h3>
-          <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
-            <input type="text" id="prov-search-users" class="form-control" placeholder="Search by name, UID or phone..." style="min-height:38px; width:220px; background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-primary);">
-            <select id="prov-filter-status" class="form-control" style="min-height:38px; width:160px; background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-primary);">
+          <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+            <input type="text" id="prov-search-users" class="form-control" placeholder="Search by name, UID or phone..." style="min-height:38px; width:200px; background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-primary);">
+            <select id="prov-filter-status" class="form-control" style="min-height:38px; width:140px; background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-primary);">
               <option value="ALL">All Statuses</option>
               <option value="ACTIVE" selected>Active Users</option>
               <option value="PENDING_PASSWORD">Pending Password</option>
               <option value="ARCHIVED">Archived Users</option>
             </select>
+            <select id="prov-filter-class" class="form-control" style="min-height:38px; width:170px; background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-primary);">
+              <option value="">All Classes (Creche → JHS)</option>
+              <option value="unassigned">Unassigned</option>
+              ${[...classes].sort((a, b) => getEduClassRank(a.class_name) - getEduClassRank(b.class_name)).map(c => `<option value="${c.class_id}">${c.class_name}</option>`).join("")}
+            </select>
+            <select id="prov-sort-order" class="form-control" style="min-height:38px; width:180px; background:var(--bg-secondary); border-color:var(--border-color); color:var(--text-primary); font-weight:500;">
+              <option value="class-asc" selected>Sort: Class (Ascending: Creche → JHS)</option>
+              <option value="class-desc">Sort: Class (Descending: JHS → Creche)</option>
+              <option value="name-asc">Sort: Name (A → Z)</option>
+              <option value="name-desc">Sort: Name (Z → A)</option>
+              <option value="uid-asc">Sort: UID (Ascending)</option>
+            </select>
+            <button type="button" id="btn-toggle-prov-order" class="btn btn-secondary" title="Quick toggle between Class Ascending and Descending order" style="min-height:38px; padding:0 0.85rem; display:flex; align-items:center; gap:0.35rem; font-size:0.85rem; white-space:nowrap;">
+              <span id="btn-prov-sort-icon">⬆️</span>
+              <span id="btn-prov-sort-label">Ascending</span>
+            </button>
           </div>
         </div>
 
@@ -2696,7 +2743,9 @@ async function renderAccountProvisioning(container) {
                   <th>UID</th>
                   <th>Full Name</th>
                   <th>Gender</th>
-                  <th>Class / Grade</th>
+                  <th id="th-prov-stud-class" style="cursor:pointer; user-select:none;" title="Click to toggle Class Ascending / Descending order">
+                    Class / Grade <span id="prov-sort-indicator" style="font-size:0.8rem; margin-left:3px; color:var(--accent-primary);">▲</span>
+                  </th>
                   <th>Primary Contact</th>
                   <th>Status</th>
                   <th>Actions</th>
@@ -2886,8 +2935,98 @@ async function renderAccountProvisioning(container) {
       return matchesStatus && matchesSearch;
     });
 
-    const allStudents = filtered.filter(u => u.role === "Student");
-    const allStaff = filtered.filter(u => u.role !== "Student" && u.role !== "Parent" && u.role !== "Guardian");
+    const classFilterEl = document.getElementById("prov-filter-class");
+    const selectedClass = classFilterEl ? classFilterEl.value : "";
+    const sortOrderEl = document.getElementById("prov-sort-order");
+    const currentSort = sortOrderEl ? sortOrderEl.value : "class-asc";
+
+    let allStudents = filtered.filter(u => u.role === "Student");
+    let allStaff = filtered.filter(u => u.role !== "Student" && u.role !== "Parent" && u.role !== "Guardian");
+
+    // Filter by selected class if set
+    if (selectedClass === "unassigned") {
+      allStudents = allStudents.filter(s => {
+        const en = enrolments.find(e => e.student_id === s.user_id && e.class_id);
+        return !en;
+      });
+      allStaff = allStaff.filter(st => {
+        const tClasses = classes.filter(c => c.class_teacher_id === st.user_id);
+        return tClasses.length === 0;
+      });
+    } else if (selectedClass) {
+      allStudents = allStudents.filter(s => {
+        const en = enrolments.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
+        return Boolean(en);
+      });
+      allStaff = allStaff.filter(st => {
+        const tClasses = classes.filter(c => c.class_teacher_id === st.user_id);
+        const isDirect = tClasses.some(c => c.class_id === selectedClass);
+        const targetClass = classes.find(c => c.class_id === selectedClass);
+        const prof = profiles.find(p => p.user_id === st.user_id) || {};
+        const staffSec = getStaffSection(st, prof, classes);
+        const classSec = targetClass ? getSectionFromClassName(targetClass.class_name) : "";
+        const matchesSec = staffSec && classSec && staffSec.toLowerCase() === classSec.toLowerCase();
+        return isDirect || matchesSec;
+      });
+    }
+
+    // Sort students by educational class rank (Creche → JHS)
+    allStudents.sort((a, b) => {
+      const enrollA = enrolments.find(e => e.student_id === a.user_id) || {};
+      const enrollB = enrolments.find(e => e.student_id === b.user_id) || {};
+      const clsA = classes.find(c => c.class_id === enrollA.class_id);
+      const clsB = classes.find(c => c.class_id === enrollB.class_id);
+
+      if (currentSort === "class-asc") {
+        const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
+        const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
+        if (rankA !== rankB) return rankA - rankB;
+        return formatFullName(a).localeCompare(formatFullName(b));
+      } else if (currentSort === "class-desc") {
+        const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
+        const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
+        if (rankA === -1 && rankB !== -1) return 1;
+        if (rankB === -1 && rankA !== -1) return -1;
+        if (rankA !== rankB) return rankB - rankA;
+        return formatFullName(a).localeCompare(formatFullName(b));
+      } else if (currentSort === "name-asc") {
+        return formatFullName(a).localeCompare(formatFullName(b));
+      } else if (currentSort === "name-desc") {
+        return formatFullName(b).localeCompare(formatFullName(a));
+      } else if (currentSort === "uid-asc") {
+        return (a.uid || "").localeCompare(b.uid || "");
+      }
+      return 0;
+    });
+
+    // Sort staff by educational class rank / department
+    allStaff.sort((a, b) => {
+      const tClassesA = classes.filter(c => c.class_teacher_id === a.user_id);
+      const tClassesB = classes.filter(c => c.class_teacher_id === b.user_id);
+      const clsA = tClassesA[0];
+      const clsB = tClassesB[0];
+
+      if (currentSort === "class-asc") {
+        const rankA = clsA ? getEduClassRank(clsA.class_name) : (a.role === "Teacher" ? 800 : (a.role === "SectionalHead" ? 850 : 900));
+        const rankB = clsB ? getEduClassRank(clsB.class_name) : (b.role === "Teacher" ? 800 : (b.role === "SectionalHead" ? 850 : 900));
+        if (rankA !== rankB) return rankA - rankB;
+        return formatFullName(a).localeCompare(formatFullName(b));
+      } else if (currentSort === "class-desc") {
+        const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
+        const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
+        if (rankA === -1 && rankB !== -1) return 1;
+        if (rankB === -1 && rankA !== -1) return -1;
+        if (rankA !== rankB) return rankB - rankA;
+        return formatFullName(a).localeCompare(formatFullName(b));
+      } else if (currentSort === "name-asc") {
+        return formatFullName(a).localeCompare(formatFullName(b));
+      } else if (currentSort === "name-desc") {
+        return formatFullName(b).localeCompare(formatFullName(a));
+      } else if (currentSort === "uid-asc") {
+        return (a.uid || "").localeCompare(b.uid || "");
+      }
+      return 0;
+    });
 
     const pagedStudents = paginateArray(allStudents, studentPage, studentPageSize);
     const pagedStaff = paginateArray(allStaff, staffPage, staffPageSize);
@@ -2920,7 +3059,7 @@ async function renderAccountProvisioning(container) {
         return `
           <tr>
             <td><strong>${s.uid}</strong></td>
-            <td>${s.first_name} ${s.last_name}</td>
+            <td>${formatFullName(s)}</td>
             <td>${s.gender || 'Male'}</td>
             <td><span class="badge badge-info">${className}</span></td>
             <td>${contactDisplay}</td>
@@ -2964,7 +3103,7 @@ async function renderAccountProvisioning(container) {
         return `
           <tr>
             <td><strong>${u.uid}</strong></td>
-            <td>${u.first_name} ${u.last_name}</td>
+            <td>${formatFullName(u)}</td>
             <td>${u.gender || 'Male'}</td>
             <td><span class="badge badge-info">${u.role}</span></td>
             <td>${u.phone}</td>
@@ -3033,9 +3172,9 @@ async function renderAccountProvisioning(container) {
         const id = btn.getAttribute("data-id");
         const user = await window.db.get("users", id);
         if (user) {
-          const newRole = prompt(`Change role for ${user.first_name} ${user.last_name}.\nEnter new role (Teacher, SectionalHead, Finance, Admin):`, user.role);
+          const newRole = prompt(`Change role for ${formatFullName(user)}.\nEnter new role (Proprietor, HeadTeacher, Teacher, SectionalHead, Finance, Admin):`, user.role);
           if (!newRole) return;
-          const validRoles = ["Teacher", "SectionalHead", "Finance", "Admin"];
+          const validRoles = ["Proprietor", "HeadTeacher", "Teacher", "SectionalHead", "Finance", "Admin"];
           if (validRoles.includes(newRole)) {
             user.role = newRole;
             await window.db.put("users", user);
@@ -3051,7 +3190,7 @@ async function renderAccountProvisioning(container) {
                 action: "ROLE_CHANGE",
                 user_id: user.user_id,
                 uid: user.uid,
-                name: `${user.first_name} ${user.last_name}`,
+                name: formatFullName(user),
                 new_role: newRole,
                 hash: hash
               })
@@ -3078,8 +3217,55 @@ async function renderAccountProvisioning(container) {
   // Register active users directory refresh hook for real-time dbSyncUpdate
   window._refreshUsersDirectory = loadUsers;
 
-  document.getElementById("prov-search-users").addEventListener("input", loadUsers);
-  document.getElementById("prov-filter-status").addEventListener("change", loadUsers);
+  document.getElementById("prov-search-users").addEventListener("input", () => {
+    studentPage = 1;
+    staffPage = 1;
+    loadUsers();
+  });
+  document.getElementById("prov-filter-status").addEventListener("change", () => {
+    studentPage = 1;
+    staffPage = 1;
+    loadUsers();
+  });
+
+  const provClassFilter = document.getElementById("prov-filter-class");
+  if (provClassFilter) {
+    provClassFilter.addEventListener("change", () => {
+      studentPage = 1;
+      staffPage = 1;
+      loadUsers();
+    });
+  }
+
+  const provSortOrder = document.getElementById("prov-sort-order");
+  if (provSortOrder) {
+    provSortOrder.addEventListener("change", () => {
+      const isDesc = provSortOrder.value === "class-desc";
+      const sortIcon = document.getElementById("btn-prov-sort-icon");
+      const sortLabel = document.getElementById("btn-prov-sort-label");
+      const sortInd = document.getElementById("prov-sort-indicator");
+      if (sortIcon) sortIcon.innerText = isDesc ? "⬇️" : "⬆️";
+      if (sortLabel) sortLabel.innerText = isDesc ? "Descending" : "Ascending";
+      if (sortInd) sortInd.innerText = isDesc ? "▼" : (provSortOrder.value === "class-asc" ? "▲" : "⇅");
+      studentPage = 1;
+      staffPage = 1;
+      loadUsers();
+    });
+  }
+
+  const btnToggleProvOrder = document.getElementById("btn-toggle-prov-order");
+  const thProvStudClass = document.getElementById("th-prov-stud-class");
+  const toggleProvClassSort = () => {
+    if (!provSortOrder) return;
+    if (provSortOrder.value === "class-asc") {
+      provSortOrder.value = "class-desc";
+    } else {
+      provSortOrder.value = "class-asc";
+    }
+    provSortOrder.dispatchEvent(new Event("change"));
+  };
+  if (btnToggleProvOrder) btnToggleProvOrder.onclick = toggleProvClassSort;
+  if (thProvStudClass) thProvStudClass.onclick = toggleProvClassSort;
 
   // Student Form Submission
   document.getElementById("form-create-student").addEventListener("submit", async (e) => {
@@ -5041,7 +5227,7 @@ async function renderBroadcastPanel(container) {
           <label style="display:flex; align-items:center; gap:0.6rem; padding:0.4rem 0.6rem; border-radius:6px; background:var(--bg-primary); border:1px solid var(--border-color); cursor:pointer; font-size:0.85rem;">
             <input type="checkbox" class="chk-custom-student" value="${s.user_id}" ${isChecked ? 'checked' : ''}>
             <div style="flex:1;">
-              <strong>${s.first_name} ${s.last_name}</strong>
+              <strong>${formatFullName(s)}</strong>
               <span style="font-size:0.75rem; color:var(--text-muted); margin-left:0.35rem;">(${s.uid || s.user_id})</span>
             </div>
             <span class="badge badge-info" style="font-size:0.7rem;">${clsName}</span>
@@ -5317,7 +5503,7 @@ async function renderBroadcastPanel(container) {
         if (!ctx.student_name || ctx.student_name === "Your Child" || ctx.student_name === "N/A") {
           const anyStudent = allUsers.find(u => u.role === "Student");
           if (anyStudent) {
-            ctx.student_name = `${anyStudent.first_name} ${anyStudent.last_name}`;
+            ctx.student_name = formatFullName(anyStudent);
             const sFin = window.api.getStudentFinancials(anyStudent.user_id, transactions);
             ctx.fees_paid = `GH¢ ${sFin.totalPaid.toFixed(2)}`;
             ctx.outstanding_fees = `GH¢ ${sFin.netArrears.toFixed(2)}`;
@@ -5760,7 +5946,7 @@ async function renderBroadcastPanel(container) {
             return `
               <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:0.35rem; gap:0.5rem;">
                 <div style="display:flex; align-items:center; gap:0.5rem;">
-                  <span><strong>${c.user.first_name} ${c.user.last_name}</strong></span>
+                  <span><strong>${formatFullName(c.user)}</strong></span>
                   ${roleBadge}
                 </div>
                 <div style="display:flex; align-items:center; gap:0.5rem;">
@@ -5854,7 +6040,7 @@ async function renderBroadcastPanel(container) {
                 dispatch_id: dispatchDocId,
                 date: todayDateStr,
                 user_id: user.user_id,
-                recipient_name: `${user.first_name} ${user.last_name}`.trim(),
+                recipient_name: formatFullName(user),
                 role: user.role,
                 phone: targetPhone,
                 status: "SENT",
@@ -5980,7 +6166,7 @@ async function renderAdmissionsIntake(container) {
       const emergency = profile.emergency_contact ? (typeof profile.emergency_contact === 'string' ? JSON.parse(profile.emergency_contact) : profile.emergency_contact) : {};
       const seekingClass = student.seeking_class || profile.seeking_class || "Unspecified";
       const commentsStr = profile.comments || "None";
-      const studentFullName = `${student.first_name} ${student.other_name ? student.other_name + ' ' : ''}${student.last_name}`;
+      const studentFullName = formatFullName(student);
 
       const fatherDisplay = profile.father_name
         ? `<strong>${profile.father_name}</strong><br><span style="font-size:0.75rem; color:var(--text-muted);">${profile.father_occupation || 'Occupation N/A'} • ${profile.father_phone || 'No Contact'}</span>`
@@ -6305,8 +6491,31 @@ async function renderFeeLedger(container) {
         </div>
 
         <div class="card">
-          <div style="display:flex; gap:1rem; margin-bottom:1rem; align-items:center;">
-            <input type="text" id="ledger-search-students" class="form-control" placeholder="Search student by name or UID..." style="width:250px; min-height:38px;">
+          <div style="display:flex; gap:0.75rem; margin-bottom:1rem; align-items:center; flex-wrap:wrap;">
+            <div style="flex:2; min-width:220px;">
+              <input type="text" id="ledger-search-students" class="form-control" placeholder="Search student by name or UID..." style="min-height:38px;">
+            </div>
+            <div style="flex:1.2; min-width:180px;">
+              <select id="ledger-class-filter" class="form-control" style="min-height:38px;">
+                <option value="">All Classes (Ascending: Creche → JHS)</option>
+                <option value="unassigned">Unassigned Students</option>
+                ${[...classes].sort((a, b) => getEduClassRank(a.class_name) - getEduClassRank(b.class_name)).map(c => `<option value="${c.class_id}">${c.class_name}</option>`).join("")}
+              </select>
+            </div>
+            <div style="flex:1.2; min-width:200px;">
+              <select id="ledger-class-sort" class="form-control" style="min-height:38px; font-weight:500;">
+                <option value="class-asc" selected>Sort: Class (Ascending: Creche → JHS)</option>
+                <option value="class-desc">Sort: Class (Descending: JHS → Creche)</option>
+                <option value="name-asc">Sort: Name (A → Z)</option>
+                <option value="name-desc">Sort: Name (Z → A)</option>
+                <option value="arrears-desc">Sort: Arrears (Highest)</option>
+                <option value="uid-asc">Sort: UID (Ascending)</option>
+              </select>
+            </div>
+            <button type="button" id="btn-toggle-ledger-order" class="btn btn-secondary" title="Quick toggle between Class Ascending and Descending order" style="min-height:38px; padding:0 0.85rem; display:flex; align-items:center; gap:0.35rem; font-size:0.85rem; white-space:nowrap;">
+              <span id="btn-ledger-sort-icon">⬆️</span>
+              <span id="btn-ledger-sort-label">Ascending</span>
+            </button>
           </div>
           <div class="table-container">
             <table class="table">
@@ -6314,6 +6523,9 @@ async function renderFeeLedger(container) {
                 <tr>
                   <th>Student UID</th>
                   <th>Full Name</th>
+                  <th id="th-ledger-class" style="cursor:pointer; user-select:none;" title="Click to toggle Class Ascending / Descending order">
+                    Class / Grade <span id="ledger-sort-indicator" style="font-size:0.8rem; margin-left:3px; color:var(--accent-primary);">▲</span>
+                  </th>
                   <th>Total Charged</th>
                   <th>Total Paid</th>
                   <th>Outstanding Arrears</th>
@@ -6609,12 +6821,61 @@ async function renderFeeLedger(container) {
         `;
       }
 
-      const filtered = students.filter(s => {
-        return `${s.first_name} ${s.last_name}`.toLowerCase().includes(searchVal) || s.uid.toLowerCase().includes(searchVal);
+      const classFilterEl = document.getElementById("ledger-class-filter");
+      const selectedClass = classFilterEl ? classFilterEl.value : "";
+      const classSortEl = document.getElementById("ledger-class-sort");
+      let currentSort = classSortEl ? classSortEl.value : "class-asc";
+
+      let filtered = students.filter(s => {
+        const fullName = formatFullName(s).toLowerCase();
+        const matchesSearch = !searchVal || fullName.includes(searchVal) || (s.uid && s.uid.toLowerCase().includes(searchVal));
+        if (!matchesSearch) return false;
+
+        if (selectedClass === "unassigned") {
+          const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id);
+          if (enroll) return false;
+        } else if (selectedClass) {
+          const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
+          if (!enroll) return false;
+        }
+        return true;
+      });
+
+      // Sort students (Default is class-asc: Creche → JHS)
+      filtered.sort((a, b) => {
+        const enrollA = enrolments.find(e => e.student_id === a.user_id) || {};
+        const enrollB = enrolments.find(e => e.student_id === b.user_id) || {};
+        const clsA = classes.find(c => c.class_id === enrollA.class_id);
+        const clsB = classes.find(c => c.class_id === enrollB.class_id);
+
+        if (currentSort === "class-asc") {
+          const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
+          const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
+          if (rankA !== rankB) return rankA - rankB;
+          return formatFullName(a).localeCompare(formatFullName(b));
+        } else if (currentSort === "class-desc") {
+          const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
+          const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
+          if (rankA === -1 && rankB !== -1) return 1;
+          if (rankB === -1 && rankA !== -1) return -1;
+          if (rankA !== rankB) return rankB - rankA;
+          return formatFullName(a).localeCompare(formatFullName(b));
+        } else if (currentSort === "name-asc") {
+          return formatFullName(a).localeCompare(formatFullName(b));
+        } else if (currentSort === "name-desc") {
+          return formatFullName(b).localeCompare(formatFullName(a));
+        } else if (currentSort === "arrears-desc") {
+          const aFin = window.api.getStudentFinancials(a.user_id, txs);
+          const bFin = window.api.getStudentFinancials(b.user_id, txs);
+          return bFin.netArrears - aFin.netArrears;
+        } else if (currentSort === "uid-asc") {
+          return (a.uid || "").localeCompare(b.uid || "");
+        }
+        return 0;
       });
 
       if (filtered.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">No active students found matching search.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No active students found matching search or class filters.</td></tr>`;
         paginationControls.innerHTML = "";
         return;
       }
@@ -6629,20 +6890,24 @@ async function renderFeeLedger(container) {
         const charged = sFin.totalCharged;
         const paid = sFin.totalPaid;
         const arrears = sFin.netArrears;
+        const enroll = enrolments.find(e => e.student_id === s.user_id) || {};
+        const cls = classes.find(c => c.class_id === enroll.class_id);
+        const classNameBadge = cls ? `<span class="badge badge-info" style="font-weight:600;">${cls.class_name}</span>` : `<span style="color:var(--text-muted); font-size:0.85rem;">Unassigned</span>`;
 
         return `
           <tr>
             <td><strong>${s.uid}</strong></td>
-            <td>${s.first_name} ${s.last_name}</td>
+            <td>${formatFullName(s)}</td>
+            <td>${classNameBadge}</td>
             <td>GH¢ ${charged.toFixed(2)}</td>
             <td>GH¢ ${paid.toFixed(2)}</td>
             <td><strong style="color:${arrears > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'}">GH¢ ${arrears.toFixed(2)}</strong></td>
             <td>
-              <button class="btn btn-secondary btn-ledger-pay" data-id="${s.user_id}" data-name="${s.first_name} ${s.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Record Pay</button>
-              <button class="btn btn-secondary btn-ledger-bill" data-id="${s.user_id}" data-name="${s.first_name} ${s.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Bill Charge</button>
-              <button class="btn btn-secondary btn-ledger-statement" data-id="${s.user_id}" data-name="${s.first_name} ${s.last_name}" data-uid="${s.uid}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Print Bill</button>
-              <button class="btn btn-secondary btn-ledger-sms-bill" data-id="${s.user_id}" data-name="${s.first_name} ${s.last_name}" data-phone="${s.phone}" data-arrears="${arrears}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">SMS Bill</button>
-              <button class="btn btn-secondary btn-ledger-history" data-id="${s.user_id}" data-name="${s.first_name} ${s.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">History</button>
+              <button class="btn btn-secondary btn-ledger-pay" data-id="${s.user_id}" data-name="${formatFullName(s)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Record Pay</button>
+              <button class="btn btn-secondary btn-ledger-bill" data-id="${s.user_id}" data-name="${formatFullName(s)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Bill Charge</button>
+              <button class="btn btn-secondary btn-ledger-statement" data-id="${s.user_id}" data-name="${formatFullName(s)}" data-uid="${s.uid}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Print Bill</button>
+              <button class="btn btn-secondary btn-ledger-sms-bill" data-id="${s.user_id}" data-name="${formatFullName(s)}" data-phone="${s.phone}" data-arrears="${arrears}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">SMS Bill</button>
+              <button class="btn btn-secondary btn-ledger-history" data-id="${s.user_id}" data-name="${formatFullName(s)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">History</button>
             </td>
           </tr>
         `;
@@ -6733,6 +6998,43 @@ async function renderFeeLedger(container) {
       currentPage = 1;
       loadLedgerList();
     });
+
+    const ledgerClassFilter = document.getElementById("ledger-class-filter");
+    if (ledgerClassFilter) {
+      ledgerClassFilter.addEventListener("change", () => {
+        currentPage = 1;
+        loadLedgerList();
+      });
+    }
+
+    const ledgerClassSort = document.getElementById("ledger-class-sort");
+    if (ledgerClassSort) {
+      ledgerClassSort.addEventListener("change", () => {
+        const isDesc = ledgerClassSort.value === "class-desc";
+        const sortIcon = document.getElementById("btn-ledger-sort-icon");
+        const sortLabel = document.getElementById("btn-ledger-sort-label");
+        const sortInd = document.getElementById("ledger-sort-indicator");
+        if (sortIcon) sortIcon.innerText = isDesc ? "⬇️" : "⬆️";
+        if (sortLabel) sortLabel.innerText = isDesc ? "Descending" : "Ascending";
+        if (sortInd) sortInd.innerText = isDesc ? "▼" : (ledgerClassSort.value === "class-asc" ? "▲" : "⇅");
+        currentPage = 1;
+        loadLedgerList();
+      });
+    }
+
+    const btnToggleLedgerOrder = document.getElementById("btn-toggle-ledger-order");
+    const thLedgerClass = document.getElementById("th-ledger-class");
+    const toggleLedgerClassSort = () => {
+      if (!ledgerClassSort) return;
+      if (ledgerClassSort.value === "class-asc") {
+        ledgerClassSort.value = "class-desc";
+      } else {
+        ledgerClassSort.value = "class-asc";
+      }
+      ledgerClassSort.dispatchEvent(new Event("change"));
+    };
+    if (btnToggleLedgerOrder) btnToggleLedgerOrder.onclick = toggleLedgerClassSort;
+    if (thLedgerClass) thLedgerClass.onclick = toggleLedgerClassSort;
 
     // Closures
     document.getElementById("btn-close-payment-modal").addEventListener("click", () => {
@@ -7238,7 +7540,7 @@ async function renderFeeLedger(container) {
 
           <div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:0.75rem; margin-top:1rem; border-top:1px dashed #cbd5e1; padding-top:0.75rem;">
             <div>
-              <div style="border-bottom:1px solid #333; width:150px; text-align:center; padding-bottom:0.15rem; font-style:italic; font-weight:600;">${currentUser.first_name} ${currentUser.last_name}</div>
+              <div style="border-bottom:1px solid #333; width:150px; text-align:center; padding-bottom:0.15rem; font-style:italic; font-weight:600;">${formatFullName(currentUser)}</div>
               <div style="text-align:center; color:#64748b; margin-top:0.15rem; font-size:0.7rem;">Authorized Signatory</div>
             </div>
             <div style="text-align:center;" class="no-print">
@@ -7397,10 +7699,30 @@ async function renderFeeLedger(container) {
 async function renderPayrollEngine(container) {
   try {
     const users = await window.db.getAll("users");
-    const staff = users.filter(u => u.role !== "Student" && u.role !== "Parent" && u.status === "ACTIVE");
+    const classes = await window.db.getAll("classes");
     const profiles = await window.db.getAll("profiles");
     const transactions = await window.db.getAll("financial_transactions");
     const currentUser = window.api.getCurrentUser();
+
+    function sortStaffByClassRank(staffList, descending = false) {
+      return [...staffList].sort((a, b) => {
+        const tClassesA = classes.filter(c => c.class_teacher_id === a.user_id);
+        const tClassesB = classes.filter(c => c.class_teacher_id === b.user_id);
+        const clsA = tClassesA[0];
+        const clsB = tClassesB[0];
+        const rankA = clsA ? getEduClassRank(clsA.class_name) : (a.role === "Teacher" ? 800 : (a.role === "SectionalHead" ? 850 : 900));
+        const rankB = clsB ? getEduClassRank(clsB.class_name) : (b.role === "Teacher" ? 800 : (b.role === "SectionalHead" ? 850 : 900));
+
+        if (descending) {
+          if (rankA !== rankB) return rankB - rankA;
+          return formatFullName(b).localeCompare(formatFullName(a));
+        }
+        if (rankA !== rankB) return rankA - rankB;
+        return formatFullName(a).localeCompare(formatFullName(b));
+      });
+    }
+
+    const staff = sortStaffByClassRank(users.filter(u => u.role !== "Student" && u.role !== "Parent" && u.status === "ACTIVE"));
 
     // Store in-memory salary adjustments for unprocessed periods
     if (!window.payrollAdjustments) {
@@ -7552,11 +7874,16 @@ async function renderPayrollEngine(container) {
           const paidAmount = matchingTx ? matchingTx.amount : 0;
           const basePayroll = window.api.calculatePayroll(profile.base_salary, profile.allowances);
 
+          const tClasses = classes.filter(c => c.class_teacher_id === member.user_id);
+          const prof = profiles.find(p => p.user_id === member.user_id) || {};
+          const sec = getStaffSection(member, prof, classes);
+          const classDesc = tClasses.length > 0 ? tClasses.map(c => c.class_name).join(", ") : sec;
+
           return `
             <tr>
               <td><strong>${member.uid}</strong></td>
-              <td>${member.first_name} ${member.last_name}</td>
-              <td><span class="badge badge-info">${member.role}</span></td>
+              <td>${formatFullName(member)}</td>
+              <td><span class="badge badge-info">${member.role}</span><br><small style="color:var(--text-secondary); font-size:0.75rem;">${classDesc}</small></td>
               <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
               <td>GH¢ ${profile.allowances.toFixed(2)}</td>
               <td><em style="color:var(--text-muted);">Processed Logs</em></td>
@@ -7581,11 +7908,16 @@ async function renderPayrollEngine(container) {
           const adj = window.payrollAdjustments[member.user_id] || { bonus: 0, advance: 0, narration: "" };
           const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
 
+          const tClasses = classes.filter(c => c.class_teacher_id === member.user_id);
+          const prof = profiles.find(p => p.user_id === member.user_id) || {};
+          const sec = getStaffSection(member, prof, classes);
+          const classDesc = tClasses.length > 0 ? tClasses.map(c => c.class_name).join(", ") : sec;
+
           return `
             <tr>
               <td><strong>${member.uid}</strong></td>
-              <td>${member.first_name} ${member.last_name}</td>
-              <td><span class="badge badge-info">${member.role}</span></td>
+              <td>${formatFullName(member)}</td>
+              <td><span class="badge badge-info">${member.role}</span><br><small style="color:var(--text-secondary); font-size:0.75rem;">${classDesc}</small></td>
               <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
               <td>GH¢ ${profile.allowances.toFixed(2)}</td>
               <td>
@@ -7599,7 +7931,7 @@ async function renderPayrollEngine(container) {
               <td>GH¢ ${payroll.paye.toFixed(2)}</td>
               <td><strong style="color:var(--accent-success)">GH¢ ${payroll.netPay.toFixed(2)}</strong></td>
               <td>
-                <button class="btn btn-secondary btn-adjust-salary" data-id="${member.user_id}" data-name="${member.first_name} ${member.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Adjust Pay</button>
+                <button class="btn btn-secondary btn-adjust-salary" data-id="${member.user_id}" data-name="${formatFullName(member)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Adjust Pay</button>
                 <button class="btn btn-secondary btn-view-payslip" data-id="${member.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem;">View Slip</button>
               </td>
             </tr>
@@ -7655,7 +7987,7 @@ async function renderPayrollEngine(container) {
         return `
           <tr>
             <td><strong>${member.uid}</strong></td>
-            <td>${member.first_name} ${member.last_name}</td>
+            <td>${formatFullName(member)}</td>
             <td><span class="badge badge-info">${member.role}</span></td>
             <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
             <td>GH¢ ${profile.allowances.toFixed(2)}</td>
@@ -7733,7 +8065,7 @@ async function renderPayrollEngine(container) {
 
         <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:1.5rem; border-bottom:1px dashed #ccc; padding-bottom:1rem;">
           <div>
-            <div><strong>Staff Member:</strong> ${member.first_name} ${member.last_name}</div>
+            <div><strong>Staff Member:</strong> ${formatFullName(member)}</div>
             <div><strong>Roster UID:</strong> ${member.uid}</div>
             <div><strong>Role Scope:</strong> ${member.role}</div>
           </div>
@@ -8372,7 +8704,7 @@ async function renderTeacherPayslip(container) {
 
           <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:1.5rem; border-bottom:1px dashed #ccc; padding-bottom:1rem;">
             <div>
-              <div><strong>Name:</strong> ${currentUser.first_name} ${currentUser.last_name}</div>
+              <div><strong>Name:</strong> ${formatFullName(currentUser)}</div>
               <div><strong>Staff ID:</strong> ${currentUser.uid}</div>
             </div>
             <div style="text-align:right;">
@@ -8520,7 +8852,7 @@ async function renderTeacherDash(container) {
                 role: assigner.role,
                 target_user_id: task.assigner_id,
                 title: "Task Completed",
-                message: `Staff ${currentUser.first_name} ${currentUser.last_name} completed task: "${task.description}"`,
+                message: `Staff ${formatFullName(currentUser)} completed task: "${task.description}"`,
                 target_view: assigner.role === "Proprietor" ? "proprietor-dash" : "headteacher-dash",
                 status: "UNREAD",
                 created_at: new Date().toISOString()
@@ -8614,7 +8946,7 @@ async function renderTeacherAttendance(container) {
         return `
           <tr>
             <td><strong>${student.uid}</strong></td>
-            <td>${student.first_name} ${student.last_name}</td>
+            <td>${formatFullName(student)}</td>
             <td>
               <select class="form-control student-att-select" data-user-id="${student.user_id}" style="min-height:38px; width:150px;">
                 <option value="PRESENT" ${status === 'PRESENT' ? 'selected' : ''}>Present</option>
@@ -8918,7 +9250,7 @@ async function renderClassWall(container) {
               replies.push({
                 reply_id: "rep-" + Date.now(),
                 author_id: currentUser.user_id,
-                author_name: `${currentUser.first_name} ${currentUser.last_name}`,
+                author_name: formatFullName(currentUser),
                 author_role: currentUser.role,
                 content: content,
                 created_at: new Date().toISOString()
@@ -8934,7 +9266,7 @@ async function renderClassWall(container) {
                   role: "ALL",
                   target_user_id: postObj.author_id,
                   title: "New Reply on Class Wall",
-                  message: `${currentUser.first_name} ${currentUser.last_name} replied to your topic: "${postObj.content.substring(0, 50)}${postObj.content.length > 50 ? '...' : ''}"`,
+                  message: `${formatFullName(currentUser)} replied to your topic: "${postObj.content.substring(0, 50)}${postObj.content.length > 50 ? '...' : ''}"`,
                   target_view: "class-wall",
                   status: "UNREAD",
                   created_at: new Date().toISOString()
@@ -8980,7 +9312,7 @@ async function renderClassWall(container) {
           post_id: "post-" + Date.now(),
           class_id: activeClassId,
           author_id: currentUser.user_id,
-          author_name: `${currentUser.first_name} ${currentUser.last_name}`,
+          author_name: formatFullName(currentUser),
           author_role: currentUser.role,
           content: content,
           replies_json: JSON.stringify([]),
@@ -9384,7 +9716,7 @@ async function renderLessonApprovals(container) {
         return `
           <tr>
             <td>${new Date(n.submitted_at).toLocaleDateString()}</td>
-            <td><strong>${teacher.first_name} ${teacher.last_name}</strong></td>
+            <td><strong>${formatFullName(teacher)}</strong></td>
             <td><strong>${n.subject}</strong>${attachIcon}</td>
             <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.82rem; color:var(--text-secondary);">${snippet}</td>
             <td><span class="badge ${badgeClass}">${n.status}</span></td>
@@ -9424,7 +9756,7 @@ async function renderLessonApprovals(container) {
       const teacher = users.find(u => u.user_id === note.teacher_id) || { first_name: "Staff", last_name: "" };
 
       document.getElementById("ln-modal-subject").innerText = note.subject;
-      document.getElementById("ln-modal-teacher").innerText = `${teacher.first_name} ${teacher.last_name}`;
+      document.getElementById("ln-modal-teacher").innerText = formatFullName(teacher);
       document.getElementById("ln-modal-date").innerText = new Date(note.submitted_at).toLocaleString();
 
       let badgeHtml = `<span class="badge badge-warning">PENDING</span>`;
@@ -9701,7 +10033,7 @@ async function renderTeacherGrading(container) {
               <label style="font-weight:600; font-size:0.85rem; color:var(--text-primary); white-space:nowrap;">Select Student:</label>
               <select id="teacher-history-student-select" class="form-control" style="min-height:36px; font-size:0.85rem; font-weight:600;">
                 <option value="">-- Choose Enrolled Student --</option>
-                ${studentRoster.map(s => `<option value="${s.user_id}">${s.first_name} ${s.last_name} (${s.uid})</option>`).join("")}
+                ${studentRoster.map(s => `<option value="${s.user_id}">${formatFullName(s)} (${s.uid})</option>`).join("")}
               </select>
             </div>
           </div>
@@ -9837,7 +10169,7 @@ async function renderTeacherGrading(container) {
               <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
                 <div>
                   <h3 style="margin:0 0 0.25rem 0;">Official Academic & Attendance Baseline</h3>
-                  <p style="margin:0; color:var(--text-secondary); font-size:0.85rem;">Master Registry Baseline Profile for <strong>${stud.first_name} ${stud.last_name}</strong> (${stud.uid})</p>
+                  <p style="margin:0; color:var(--text-secondary); font-size:0.85rem;">Master Registry Baseline Profile for <strong>${formatFullName(stud)}</strong> (${stud.uid})</p>
                 </div>
                 <span class="badge badge-success" style="font-size:0.85rem; padding:0.4rem 0.8rem;">Official Master Records</span>
               </div>
@@ -9866,7 +10198,7 @@ async function renderTeacherGrading(container) {
             <div style="font-size:2.5rem; margin-bottom:0.75rem;">📚</div>
             <h3 style="margin:0 0 0.5rem 0;">No Past Academic History Recorded Yet</h3>
             <p style="color:var(--text-secondary); max-width:480px; margin:0 auto; font-size:0.85rem;">
-              No continuous assessment scores or terminal examination marks have been logged yet for <strong>${stud.first_name} ${stud.last_name}</strong>. Once grading is recorded across terms, full historical trends and term averages will appear here.
+              No continuous assessment scores or terminal examination marks have been logged yet for <strong>${formatFullName(stud)}</strong>. Once grading is recorded across terms, full historical trends and term averages will appear here.
             </p>
           </div>
         `;
@@ -10165,7 +10497,7 @@ async function renderTeacherGrading(container) {
         return `
           <tr data-user-id="${s.user_id}">
             <td>
-              <strong>${s.first_name} ${s.last_name}</strong>
+              <strong>${formatFullName(s)}</strong>
               <div style="font-size:0.75rem; color:var(--text-secondary);">${s.uid || ''}</div>
             </td>
             <td>
@@ -11337,7 +11669,7 @@ async function renderStudentDash(container) {
     let teacherName = "Unassigned Teacher";
     if (myClass && myClass.class_teacher_id) {
       const t = users.find(u => u.user_id === myClass.class_teacher_id);
-      if (t) teacherName = `${t.first_name} ${t.last_name}`;
+      if (t) teacherName = formatFullName(t);
     }
 
     const myScores = scores.filter(s => s.student_id === currentUser.user_id);
@@ -11423,7 +11755,7 @@ async function generateReportCardSheet(studentId, targetContainerId = "parent-re
 
   const allUsers = await window.db.getAll("users") || [];
   const headTeacher = allUsers.find(u => u.role === "HeadTeacher" && u.status === "ACTIVE") || allUsers.find(u => u.role === "HeadTeacher");
-  const headTeacherName = headTeacher ? `${headTeacher.first_name} ${headTeacher.last_name}` : "Comfort A. Appiah";
+  const headTeacherName = headTeacher ? formatFullName(headTeacher) : "Comfort A. Appiah";
 
   const student = report.student;
   const myClassName = report.classInfo.class_name || "General Class";
@@ -11457,7 +11789,7 @@ async function generateReportCardSheet(studentId, targetContainerId = "parent-re
 
       <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:1rem; font-size:0.95rem; line-height:1.6; margin-bottom:2rem;">
         <div>
-          <div><strong>Student Name:</strong> ${student.first_name} ${student.last_name}</div>
+          <div><strong>Student Name:</strong> ${formatFullName(student)}</div>
           <div><strong>Student UID:</strong> ${student.uid}</div>
           <div><strong>Gender:</strong> ${student.gender || "Not Specified"}</div>
           <div><strong>Academic Class:</strong> ${myClassName}</div>
@@ -12230,7 +12562,7 @@ async function renderAcademicQuality(container) {
         return `
           <tr>
             <td><strong>${s.uid}</strong></td>
-            <td>${s.first_name} ${s.last_name}</td>
+            <td>${formatFullName(s)}</td>
             <td>${countDisplay}</td>
             <td><strong style="color:var(--accent-primary);">${avgStr}</strong></td>
             <td>${badge}</td>
@@ -12424,9 +12756,9 @@ async function renderAcademicQuality(container) {
         }
         
         return `
-          <tr class="clickable-row btn-drill-attend-student" data-studentid="${s.user_id}" data-studentname="${s.first_name} ${s.last_name}" style="cursor:pointer;">
+          <tr class="clickable-row btn-drill-attend-student" data-studentid="${s.user_id}" data-studentname="${formatFullName(s)}" style="cursor:pointer;">
             <td><strong>${s.uid}</strong></td>
-            <td>${s.first_name} ${s.last_name}</td>
+            <td>${formatFullName(s)}</td>
             <td style="color:var(--accent-success);">${displayPres}</td>
             <td>${displayLate}</td>
             <td style="color:var(--accent-danger);">${displayAbs}</td>
@@ -12861,7 +13193,7 @@ async function renderAttendanceTracker(container) {
         return `
           <tr>
             <td><strong>${s.uid}</strong></td>
-            <td>${s.first_name} ${s.last_name}</td>
+            <td>${formatFullName(s)}</td>
             <td>${p}</td>
             <td>${l}</td>
             <td>${ab}</td>
@@ -12937,7 +13269,7 @@ async function renderAttendanceTracker(container) {
         return `
           <tr>
             <td><strong>${s.uid}</strong></td>
-            <td>${s.first_name} ${s.last_name}</td>
+            <td>${formatFullName(s)}</td>
             <td><span class="badge badge-info">${s.role}</span></td>
             <td>${p}</td>
             <td>${l}</td>
@@ -13701,7 +14033,7 @@ async function renderRecordsManagement(container) {
           <div id="rec-class-filter-container" style="flex:1.2; min-width:180px;">
             <select id="rec-class-filter" class="form-control" style="min-height:38px;">
               <option value="">All Classes (Ascending)</option>
-              ${classes.map(c => `<option value="${c.class_id}">${c.class_name}</option>`).join("")}
+              ${[...classes].sort((a, b) => getEduClassRank(a.class_name) - getEduClassRank(b.class_name)).map(c => `<option value="${c.class_id}">${c.class_name}</option>`).join("")}
             </select>
           </div>
           <div id="rec-sort-container" style="flex:1.2; min-width:210px;">
@@ -14348,18 +14680,18 @@ async function renderRecordsManagement(container) {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
             const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
             if (rankA !== rankB) return rankA - rankB;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "class-desc") {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
             const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
             if (rankA === -1 && rankB !== -1) return 1;
             if (rankB === -1 && rankA !== -1) return -1;
             if (rankA !== rankB) return rankB - rankA;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-asc") {
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-desc") {
-            return `${b.first_name} ${b.last_name}`.localeCompare(`${a.first_name} ${a.last_name}`);
+            return formatFullName(b).localeCompare(formatFullName(a));
           } else if (currentSort === "uid-asc") {
             return a.uid.localeCompare(b.uid);
           }
@@ -14399,9 +14731,9 @@ async function renderRecordsManagement(container) {
           return [
             s.uid || "",
             s.first_name || "",
-            s.other_names || "",
+            s.other_name || s.other_names || "",
             s.last_name || "",
-            `${s.first_name || ""} ${s.other_names ? s.other_names + " " : ""}${s.last_name || ""}`.trim(),
+            formatFullName(s),
             s.gender || "Not Specified",
             className,
             cummAtt,
@@ -14425,7 +14757,7 @@ async function renderRecordsManagement(container) {
         const staffRoles = ["Proprietor", "HeadTeacher", "Finance", "Admin", "Teacher", "SectionalHead"];
         const staff = users.filter(u => staffRoles.includes(u.role));
         let filtered = staff.filter(s => {
-          const fullname = `${s.first_name} ${s.last_name}`.toLowerCase();
+          const fullname = formatFullName(s).toLowerCase();
           const matchSearch = s.uid.toLowerCase().includes(searchVal) || 
                               fullname.includes(searchVal) || 
                               s.role.toLowerCase().includes(searchVal) ||
@@ -14463,18 +14795,18 @@ async function renderRecordsManagement(container) {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : (a.role === "Teacher" ? 800 : 999);
             const rankB = clsB ? getEduClassRank(clsB.class_name) : (b.role === "Teacher" ? 800 : 999);
             if (rankA !== rankB) return rankA - rankB;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "class-desc") {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
             const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
             if (rankA === -1 && rankB !== -1) return 1;
             if (rankB === -1 && rankA !== -1) return -1;
             if (rankA !== rankB) return rankB - rankA;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-asc") {
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-desc") {
-            return `${b.first_name} ${b.last_name}`.localeCompare(`${a.first_name} ${a.last_name}`);
+            return formatFullName(b).localeCompare(formatFullName(a));
           } else if (currentSort === "uid-asc") {
             return a.uid.localeCompare(b.uid);
           }
@@ -14484,6 +14816,7 @@ async function renderRecordsManagement(container) {
         csvHeaders = [
           "Staff UID",
           "First Name",
+          "Other Name(s)",
           "Last Name",
           "Full Name",
           "Role",
@@ -14504,8 +14837,9 @@ async function renderRecordsManagement(container) {
           return [
             s.uid || "",
             s.first_name || "",
+            s.other_name || s.other_names || "",
             s.last_name || "",
-            `${s.first_name || ""} ${s.last_name || ""}`.trim(),
+            formatFullName(s),
             s.role || "",
             classStr,
             s.phone || "",
@@ -14575,7 +14909,7 @@ async function renderRecordsManagement(container) {
 
         const students = users.filter(u => u.role === "Student");
         let filtered = students.filter(s => {
-          const fullname = `${s.first_name} ${s.last_name}`.toLowerCase();
+          const fullname = formatFullName(s).toLowerCase();
           const matchSearch = s.uid.toLowerCase().includes(searchVal) || 
                               fullname.includes(searchVal) || 
                               (s.phone && s.phone.includes(searchVal));
@@ -14608,18 +14942,18 @@ async function renderRecordsManagement(container) {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
             const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
             if (rankA !== rankB) return rankA - rankB;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "class-desc") {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
             const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
             if (rankA === -1 && rankB !== -1) return 1;
             if (rankB === -1 && rankA !== -1) return -1;
             if (rankA !== rankB) return rankB - rankA;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-asc") {
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-desc") {
-            return `${b.first_name} ${b.last_name}`.localeCompare(`${a.first_name} ${a.last_name}`);
+            return formatFullName(b).localeCompare(formatFullName(a));
           } else if (currentSort === "uid-asc") {
             return a.uid.localeCompare(b.uid);
           }
@@ -14643,7 +14977,7 @@ async function renderRecordsManagement(container) {
           return `
             <tr>
               <td><strong>${s.uid}</strong></td>
-              <td>${s.first_name} ${s.last_name}</td>
+              <td>${formatFullName(s)}</td>
               <td>${className}</td>
               <td><span class="badge badge-success" style="font-weight:600;">${attRate}</span></td>
               <td><span class="badge badge-${acadBadgeColor}" style="font-weight:600;">${acadScore}</span></td>
@@ -14652,7 +14986,7 @@ async function renderRecordsManagement(container) {
               <td>
                 <button class="btn btn-secondary btn-rec-view" data-id="${s.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">View Profile</button>
                 <button class="btn btn-primary btn-rec-edit" data-id="${s.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem;">✏️ Edit</button>
-                ${s.status === 'ARCHIVED' ? `<button class="btn btn-secondary btn-rec-reactivate" data-id="${s.user_id}" data-role="Student" data-name="${s.first_name} ${s.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem; color:var(--accent-success); border-color:var(--accent-success); background:rgba(16,185,129,0.1);">🔄 Reactivate</button>` : ''}
+                ${s.status === 'ARCHIVED' ? `<button class="btn btn-secondary btn-rec-reactivate" data-id="${s.user_id}" data-role="Student" data-name="${formatFullName(s)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem; color:var(--accent-success); border-color:var(--accent-success); background:rgba(16,185,129,0.1);">🔄 Reactivate</button>` : ''}
               </td>
             </tr>
           `;
@@ -14701,7 +15035,7 @@ async function renderRecordsManagement(container) {
         const staffRoles = ["Proprietor", "HeadTeacher", "Finance", "Admin", "Teacher", "SectionalHead"];
         const staff = users.filter(u => staffRoles.includes(u.role));
         let filtered = staff.filter(s => {
-          const fullname = `${s.first_name} ${s.last_name}`.toLowerCase();
+          const fullname = formatFullName(s).toLowerCase();
           const matchSearch = s.uid.toLowerCase().includes(searchVal) || 
                               fullname.includes(searchVal) || 
                               s.role.toLowerCase().includes(searchVal) ||
@@ -14744,18 +15078,18 @@ async function renderRecordsManagement(container) {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : (a.role === "Teacher" ? 800 : 999);
             const rankB = clsB ? getEduClassRank(clsB.class_name) : (b.role === "Teacher" ? 800 : 999);
             if (rankA !== rankB) return rankA - rankB;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "class-desc") {
             const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
             const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
             if (rankA === -1 && rankB !== -1) return 1;
             if (rankB === -1 && rankA !== -1) return -1;
             if (rankA !== rankB) return rankB - rankA;
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-asc") {
-            return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+            return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "name-desc") {
-            return `${b.first_name} ${b.last_name}`.localeCompare(`${a.first_name} ${a.last_name}`);
+            return formatFullName(b).localeCompare(formatFullName(a));
           } else if (currentSort === "uid-asc") {
             return a.uid.localeCompare(b.uid);
           }
@@ -14776,7 +15110,7 @@ async function renderRecordsManagement(container) {
           return `
             <tr>
               <td><strong>${s.uid}</strong></td>
-              <td>${s.first_name} ${s.last_name}</td>
+              <td>${formatFullName(s)}</td>
               <td><span class="badge badge-info">${s.role}</span></td>
               <td>${classBadge}</td>
               <td>${s.phone || "N/A"}</td>
@@ -14784,7 +15118,7 @@ async function renderRecordsManagement(container) {
               <td>
                 <button class="btn btn-secondary btn-rec-view" data-id="${s.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">View Profile</button>
                 <button class="btn btn-primary btn-rec-edit" data-id="${s.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem;">✏️ Edit</button>
-                ${s.status === 'ARCHIVED' ? `<button class="btn btn-secondary btn-rec-reactivate" data-id="${s.user_id}" data-role="${s.role}" data-name="${s.first_name} ${s.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem; color:var(--accent-success); border-color:var(--accent-success); background:rgba(16,185,129,0.1);">🔄 Reactivate</button>` : ''}
+                ${s.status === 'ARCHIVED' ? `<button class="btn btn-secondary btn-rec-reactivate" data-id="${s.user_id}" data-role="${s.role}" data-name="${formatFullName(s)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem; color:var(--accent-success); border-color:var(--accent-success); background:rgba(16,185,129,0.1);">🔄 Reactivate</button>` : ''}
               </td>
             </tr>
           `;
@@ -15048,7 +15382,7 @@ async function renderRecordsManagement(container) {
         avatarEl.innerText = (u.first_name.charAt(0) + (u.last_name ? u.last_name.charAt(0) : "")).toUpperCase();
       }
 
-      document.getElementById("profile-full-name").innerText = `${u.first_name} ${u.other_name ? u.other_name + ' ' : ''}${u.last_name}`;
+      document.getElementById("profile-full-name").innerText = formatFullName(u);
       document.getElementById("profile-uid-badge").innerText = `${u.role.toUpperCase()} • ${u.uid}`;
 
       const toggleStatusBtn = document.getElementById("btn-profile-toggle-status");
@@ -15097,7 +15431,7 @@ async function renderRecordsManagement(container) {
 
       document.getElementById("btn-profile-sms").onclick = () => {
         const phone = u.phone || "0240000000";
-        const text = prompt(`Send SMS to ${u.first_name} ${u.last_name}:`, `Dear ${u.first_name}, `);
+        const text = prompt(`Send SMS to ${formatFullName(u)}:`, `Dear ${u.first_name}, `);
         if (text) {
           window.api.simulateSMS(phone, text);
           showToast("SMS dispatched successfully", "success");
@@ -15468,7 +15802,7 @@ async function renderRecordsManagement(container) {
       document.getElementById("edit-rec-user-id").value = u.user_id;
       document.getElementById("edit-rec-user-role").value = u.role;
 
-      document.getElementById("admin-edit-modal-title").innerHTML = `✏️ Edit Record: ${u.first_name} ${u.last_name} <span class="badge badge-info" style="margin-left:0.5rem; font-size:0.75rem;">${u.uid}</span>`;
+      document.getElementById("admin-edit-modal-title").innerHTML = `✏️ Edit Record: ${formatFullName(u)} <span class="badge badge-info" style="margin-left:0.5rem; font-size:0.75rem;">${u.uid}</span>`;
       document.getElementById("admin-edit-modal-subtitle").innerText = `Direct administrative modification (${u.role})`;
 
       // Base fields
@@ -15953,7 +16287,7 @@ async function renderRecordsManagement(container) {
           request_id: auditLogId,
           user_id: targetUserId,
           uid: u.uid,
-          name: `${u.first_name} ${u.last_name}`,
+          name: formatFullName(u),
           role: u.role,
           proposed_data: JSON.stringify({
             direct_admin_edit: true,
@@ -15991,7 +16325,7 @@ async function renderRecordsManagement(container) {
           showDetailedProfile(targetUserId);
         }
 
-        showToast(`Record for ${u.first_name} ${u.last_name} (${u.uid}) updated successfully!`, "success");
+        showToast(`Record for ${formatFullName(u)} (${u.uid}) updated successfully!`, "success");
 
       } catch (err) {
         console.error("Direct record edit error:", err);
@@ -16062,7 +16396,7 @@ async function renderProspectusManager(container) {
                 <div class="form-group portal-hidden" id="pros-student-target-container">
                   <label class="form-label">Select Student</label>
                   <select id="pros-student-select" class="form-control">
-                    ${students.map(s => `<option value="${s.user_id}">${s.first_name} ${s.last_name} (${s.uid})</option>`).join("")}
+                    ${students.map(s => `<option value="${s.user_id}">${formatFullName(s)} (${s.uid})</option>`).join("")}
                   </select>
                 </div>
               </div>
@@ -16106,7 +16440,7 @@ async function renderProspectusManager(container) {
                   <option value="PRIMARY">Primary level</option>
                   <option value="JHS">JHS level</option>
                   ${classes.map(c => `<option value="${c.class_name}">${c.class_name}</option>`).join("")}
-                  ${students.map(s => `<option value="${s.user_id}">${s.first_name} ${s.last_name}</option>`).join("")}
+                  ${students.map(s => `<option value="${s.user_id}">${formatFullName(s)}</option>`).join("")}
                 </select>
                 <button id="btn-print-prospectus" class="btn btn-primary" style="min-height:32px; font-size:0.8rem; padding:0 0.75rem;">Print List</button>
               </div>
@@ -16179,7 +16513,7 @@ async function renderProspectusManager(container) {
         let scopeStr = "";
         if (item.target_type === "INDIVIDUAL") {
           const stud = students.find(s => s.user_id === item.target_student_id);
-          scopeStr = stud ? `${stud.first_name} ${stud.last_name} (${stud.uid})` : "Individual student";
+          scopeStr = stud ? `${formatFullName(stud)} (${stud.uid})` : "Individual student";
         } else {
           scopeStr = `Group: ${item.target_group}`;
         }
@@ -16370,7 +16704,7 @@ async function renderBroadcastRequests(container) {
           await window.db.put("broadcast_requests", {
             request_id: reqId,
             teacher_id: currentUser.user_id,
-            teacher_name: `${currentUser.first_name} ${currentUser.last_name}`,
+            teacher_name: formatFullName(currentUser),
             scope: scope,
             title: title,
             message: message,
@@ -16796,7 +17130,7 @@ async function showPayslipModalForSelf(userId, historicalAmt = null, selectedPer
 
     <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:1.5rem; border-bottom:1px dashed #ccc; padding-bottom:1rem; color:#333;">
       <div>
-        <div><strong>Staff Member:</strong> ${member.first_name} ${member.last_name}</div>
+        <div><strong>Staff Member:</strong> ${formatFullName(member)}</div>
         <div><strong>Roster UID:</strong> ${member.uid}</div>
         <div><strong>Role Scope:</strong> ${member.role}</div>
       </div>
@@ -16970,7 +17304,7 @@ document.getElementById("form-personal-profile-update").addEventListener("submit
       user_id: currentUser.user_id,
       uid: currentUser.uid,
       role: currentUser.role,
-      name: `${currentUser.first_name} ${currentUser.last_name}`,
+      name: formatFullName(currentUser),
       timestamp: new Date().toISOString(),
       status: "APPROVED",
       approved_at: new Date().toISOString(),
@@ -17013,7 +17347,7 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (storeName === "users" && docData.user_id === user.user_id) {
         const nameSpan = document.getElementById("header-user-name");
         if (nameSpan) {
-          nameSpan.innerHTML = `<span class="header-welcome-prefix">Welcome, </span><span class="header-user-fullname">${docData.first_name} ${docData.last_name}</span> <span class="header-user-role-badge">(${docData.role})</span>`;
+          nameSpan.innerHTML = `<span class="header-welcome-prefix">Welcome, </span><span class="header-user-fullname">${formatFullName(docData)}</span> <span class="header-user-role-badge">(${docData.role})</span>`;
         }
       }
     }
@@ -17996,7 +18330,7 @@ async function renderRecordsDashboard(container) {
         tableBody.innerHTML = sortedClasses.map(c => {
           const count = validEnrolments.filter(e => e.class_id === c.class_id).length;
           const teacher = staff.find(s => s.user_id === c.class_teacher_id);
-          const teacherName = teacher ? `${teacher.first_name} ${teacher.last_name}` : "Unassigned";
+          const teacherName = teacher ? formatFullName(teacher) : "Unassigned";
           const sectionName = getSectionFromClassName(c.class_name);
 
           return `
@@ -18190,7 +18524,7 @@ ${isProprietor ? `
     <div class="form-group">
       <label class="form-label">Select Staff Target</label>
       <select id="prop-task-staff-target" class="form-control" required style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
-        ${teachers.map(t => `<option value="${t.user_id}">${t.first_name} ${t.last_name}</option>`).join("")}
+        ${teachers.map(t => `<option value="${t.user_id}">${formatFullName(t)}</option>`).join("")}
       </select>
     </div>
     <div class="form-group">
@@ -18400,7 +18734,7 @@ function renderList() {
     const section = getStaffSection(t, profile, classes);
     const tClasses = classes.filter(c => c.class_teacher_id === t.user_id);
     const classNames = tClasses.map(c => c.class_name).join(" ").toLowerCase();
-    const fullname = `${t.first_name} ${t.last_name}`.toLowerCase();
+    const fullname = formatFullName(t).toLowerCase();
 
     const matchesSearch = !searchVal || 
       t.uid.toLowerCase().includes(searchVal) ||
@@ -18431,18 +18765,18 @@ function renderList() {
       const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
       const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
       if (rankA !== rankB) return rankA - rankB;
-      return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+      return formatFullName(a).localeCompare(formatFullName(b));
     } else if (currentSuperSort === "class-desc") {
       const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
       const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
       if (rankA === -1 && rankB !== -1) return 1;
       if (rankB === -1 && rankA !== -1) return -1;
       if (rankA !== rankB) return rankB - rankA;
-      return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+      return formatFullName(a).localeCompare(formatFullName(b));
     } else if (currentSuperSort === "name-asc") {
-      return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+      return formatFullName(a).localeCompare(formatFullName(b));
     } else if (currentSuperSort === "name-desc") {
-      return `${b.first_name} ${b.last_name}`.localeCompare(`${a.first_name} ${a.last_name}`);
+      return formatFullName(b).localeCompare(formatFullName(a));
     } else if (currentSuperSort === "compliance-desc") {
       const datesA = new Set(attendance.filter(att => att.marked_by === a.user_id).map(att => att.date)).size;
       const datesB = new Set(attendance.filter(att => att.marked_by === b.user_id).map(att => att.date)).size;
@@ -18502,17 +18836,17 @@ function renderList() {
     return `
       <tr>
         <td><strong>${t.uid}</strong></td>
-        <td>${t.first_name} ${t.last_name}</td>
+        <td>${formatFullName(t)}</td>
         <td>${section}</td>
         <td>${classNameStr}</td>
         <td>${notesStr}</td>
         <td><strong>${classAvgStr}</strong></td>
         <td>${complianceStr}</td>
         <td>
-          <button class="btn btn-secondary btn-super-roster" data-id="${t.user_id}" data-name="${t.first_name} ${t.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Roster</button>
+          <button class="btn btn-secondary btn-super-roster" data-id="${t.user_id}" data-name="${formatFullName(t)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Roster</button>
           <button class="btn btn-secondary btn-super-notes" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Notes</button>
-          <button class="btn btn-secondary btn-super-assign" data-id="${t.user_id}" data-name="${t.first_name} ${t.last_name}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Class</button>
-          <button class="btn btn-secondary btn-super-sms" data-name="${t.first_name} ${t.last_name}" data-phone="${t.phone}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">SMS</button>
+          <button class="btn btn-secondary btn-super-assign" data-id="${t.user_id}" data-name="${formatFullName(t)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Class</button>
+          <button class="btn btn-secondary btn-super-sms" data-name="${formatFullName(t)}" data-phone="${t.phone}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">SMS</button>
         </td>
       </tr>
     `;
@@ -18615,7 +18949,7 @@ async function showRosterModal(teacherId, teacherName) {
           ${rosterUsers.map(u => `
             <tr>
               <td><strong>${u.uid}</strong></td>
-              <td>${u.first_name} ${u.last_name}</td>
+              <td>${formatFullName(u)}</td>
               <td>${u.className}</td>
             </tr>
           `).join("")}
@@ -18746,7 +19080,7 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
         const targetId = document.getElementById("prop-task-staff-target").value;
 
         const targetUser = await window.db.get("users", targetId);
-        const targetName = targetUser ? `${targetUser.first_name} ${targetUser.last_name}` : "Unknown Staff";
+        const targetName = targetUser ? formatFullName(targetUser) : "Unknown Staff";
         
         const taskId = "task-" + Date.now();
 
@@ -18788,7 +19122,7 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
           return `
             <tr>
               <td><strong>${t.uid}</strong></td>
-              <td>${t.first_name} ${t.last_name}</td>
+              <td>${formatFullName(t)}</td>
               <td>${t.phone}</td>
               <td>
                 <select class="form-control staff-status-select" data-user-id="${t.user_id}" style="min-height:38px; padding:0 0.5rem;">
@@ -19383,7 +19717,7 @@ async function renderQuestionnairesPortal(container) {
           response_id: responseId,
           questionnaire_id: qid,
           user_id: currentUser.user_id,
-          user_name: `${currentUser.first_name} ${currentUser.last_name}`,
+          user_name: formatFullName(currentUser),
           answer_text: JSON.stringify(answers),
           submitted_at: new Date().toISOString()
         };
@@ -19409,7 +19743,7 @@ async function renderQuestionnairesPortal(container) {
               role: creatorUser.role,
               target_user_id: q.creator_id,
               title: "Poll Response Received",
-              message: `Response received for "${q.title}" from ${currentUser.first_name} ${currentUser.last_name}.`,
+              message: `Response received for "${q.title}" from ${formatFullName(currentUser)}.`, 
               target_view: "questionnaires-portal",
               status: "UNREAD",
               created_at: new Date().toISOString()
@@ -19470,7 +19804,7 @@ async function renderQuestionnairesPortal(container) {
         allow_collation: allowCollation,
         questions: questions,
         creator_id: currentUser.user_id,
-        creator_name: `${currentUser.first_name} ${currentUser.last_name}`,
+        creator_name: formatFullName(currentUser),
         created_at: new Date().toISOString()
       };
 
@@ -19581,7 +19915,7 @@ async function initDailyBirthdayAutoScheduler() {
                 dispatch_id: dispatchDocId,
                 date: todayKey,
                 user_id: celebrant.user_id,
-                recipient_name: `${celebrant.first_name} ${celebrant.last_name}`.trim(),
+                recipient_name: formatFullName(celebrant),
                 role: celebrant.role,
                 phone: targetPhone,
                 status: "SENT",
@@ -19801,7 +20135,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (user && user.uid === uid && (user.status === "ACTIVE" || user.status === "PENDING_PASSWORD")) {
         document.getElementById("set-pwd-uid").value = uid;
         document.getElementById("set-pwd-userid").value = userId;
-        document.getElementById("set-pwd-display-name").value = `${user.first_name} ${user.last_name} (${user.uid})`;
+        document.getElementById("set-pwd-display-name").value = `${formatFullName(user)} (${user.uid})`;
         navigateTo("view-set-password");
         showToast("Set your account password to begin.", "info");
       } else {
@@ -19910,7 +20244,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           action_details: JSON.stringify({
             action: "SET_PASSWORD",
             uid: uid,
-            name: `${user.first_name} ${user.last_name}`,
+            name: formatFullName(user),
             timestamp: new Date().toISOString()
           })
         });
@@ -19971,7 +20305,7 @@ async function renderParentDash(container) {
           <div style="display:flex; align-items:center; gap:0.5rem;">
             <label style="font-weight:600; font-size:0.85rem;">Select Sibling Profile:</label>
             <select id="parent-child-selector" class="form-control" style="min-height:38px; width:200px;">
-              ${children.map(c => `<option value="${c.user_id}">${c.first_name} ${c.last_name}</option>`).join("")}
+              ${children.map(c => `<option value="${c.user_id}">${formatFullName(c)}</option>`).join("")}
             </select>
           </div>
         </div>
@@ -20087,7 +20421,7 @@ async function renderChildOverviewTab(studentId, subContainer) {
   let teacherName = "Unassigned Teacher";
   if (cl && cl.class_teacher_id) {
     const t = users.find(u => u.user_id === cl.class_teacher_id);
-    if (t) teacherName = `${t.first_name} ${t.last_name}`;
+    if (t) teacherName = formatFullName(t);
   }
 
   subContainer.innerHTML = `
@@ -20115,7 +20449,7 @@ async function renderChildOverviewTab(studentId, subContainer) {
           <h3>Biographical Overview</h3>
           <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.75rem; font-size:0.9rem;">
             <div>Child UID: <strong>${student.uid}</strong></div>
-            <div>Full Name: <strong>${student.first_name} ${student.last_name}</strong></div>
+            <div>Full Name: <strong>${formatFullName(student)}</strong></div>
             <div>Gender: <strong>${student.gender || "Not Specified"}</strong></div>
             <div>Date of Birth: <strong>${student.date_of_birth || "N/A"}</strong></div>
             <div>Enrolled Classroom: <strong>${className}</strong></div>
@@ -20179,7 +20513,7 @@ async function renderChildFeesTab(studentId, subContainer) {
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
           <h3 style="margin:0;">Itemized Account Ledger & Statements</h3>
-          <span style="font-size:0.85rem; color:var(--text-muted);">Centralized Financial Records for <strong>${student.first_name} ${student.last_name} (${student.uid})</strong></span>
+          <span style="font-size:0.85rem; color:var(--text-muted);">Centralized Financial Records for <strong>${formatFullName(student)} (${student.uid})</strong></span>
         </div>
 
         <div class="table-container">
@@ -20460,7 +20794,7 @@ async function renderNotificationsPortal(container) {
                 return `
                   <div style="display:flex; justify-content:space-between; align-items:center; padding:0.5rem 0.75rem; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; font-size:0.85rem;">
                     <div>
-                      <strong>${sender.first_name} ${sender.last_name}:</strong> <span style="color:var(--text-secondary);">${m.message_text.substring(0, 80)}${m.message_text.length > 80 ? '...' : ''}</span>
+                      <strong>${formatFullName(sender)}:</strong> <span style="color:var(--text-secondary);">${m.message_text.substring(0, 80)}${m.message_text.length > 80 ? '...' : ''}</span>
                     </div>
                     <span style="font-size:0.75rem; color:var(--text-muted);">${new Date(m.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
@@ -20653,7 +20987,7 @@ async function renderPortalMessages(container) {
       });
 
       const filtered = contacts.filter(c => {
-        const name = `${c.first_name} ${c.last_name}`.toLowerCase();
+        const name = formatFullName(c).toLowerCase();
         return name.includes(searchFilter.toLowerCase()) || c.role.toLowerCase().includes(searchFilter.toLowerCase());
       });
 
@@ -20672,7 +21006,7 @@ async function renderPortalMessages(container) {
                 ${c.first_name[0]}${c.last_name[0]}
               </div>
               <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
-                <h4 style="margin:0; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.first_name} ${c.last_name}</h4>
+                <h4 style="margin:0; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${formatFullName(c)}</h4>
                 <span style="font-size:0.7rem; color:var(--accent-secondary); font-weight:600;">${c.role}</span>
               </div>
             </div>
@@ -20731,7 +21065,7 @@ async function renderPortalMessages(container) {
             ${selectedContact.first_name[0]}${selectedContact.last_name[0]}
           </div>
           <div style="overflow:hidden; flex:1; min-width:0;">
-            <h3 style="margin:0; font-family:var(--font-family-display); font-size:1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${selectedContact.first_name} ${selectedContact.last_name}</h3>
+            <h3 style="margin:0; font-family:var(--font-family-display); font-size:1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${formatFullName(selectedContact)}</h3>
             <span style="font-size:0.75rem; color:var(--text-muted); font-weight:bold;">${selectedContact.role} • ID: ${selectedContact.uid}</span>
           </div>
         </div>

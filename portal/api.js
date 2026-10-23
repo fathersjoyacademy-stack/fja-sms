@@ -12,10 +12,28 @@ function escapeHTML(str) {
 }
 window.escapeHTML = escapeHTML;
 
+// Centralized Full Name Formatter with complete middle name (other_name) support
+function formatFullName(user) {
+  if (!user) return "";
+  if (typeof user === "string") return user.trim();
+  const first = (user.first_name || "").trim();
+  const middle = (user.other_name || user.other_names || user.middle_name || "").trim();
+  const last = (user.last_name || "").trim();
+  const parts = [first, middle, last].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(" ");
+  }
+  return (user.name || user.full_name || user.uid || "").trim();
+}
+window.formatFullName = formatFullName;
+
 const api = {
   currentUser: null,
   escapeHTML(str) {
     return escapeHTML(str);
+  },
+  formatFullName(user) {
+    return formatFullName(user);
   },
 
   // --- Centralized Academic Session & Active Term Engine ---
@@ -459,7 +477,7 @@ const api = {
     const existingWithPhone = users.filter(u => u.phone === userPayload.phone && u.status !== "ARCHIVED");
     if (existingWithPhone.length > 0) {
       console.log(`Phone ${userPayload.phone} is shared with ${existingWithPhone.length} account(s):`, 
-        existingWithPhone.map(u => `${u.first_name} ${u.last_name} (${u.role})`).join(", "));
+        existingWithPhone.map(u => `${this.formatFullName(u)} (${u.role})`).join(", "));
     }
 
     // 1. DUPLICATE ACCOUNT CHECK:
@@ -582,7 +600,7 @@ const api = {
             // Check if an existing staff or parent user has this phone number
             const existingUserParent = users.find(u => (u.phone === parentPhone || (normParentPhone && this.normalizeGhanaPhone(u.phone) === normParentPhone)) && u.role !== "Student");
             if (existingUserParent) {
-              parentName = `${existingUserParent.first_name} ${existingUserParent.last_name}`.trim();
+              parentName = this.formatFullName(existingUserParent);
               parentEmail = existingUserParent.email || parentEmail;
               if (existingUserParent.role === "Teacher" || existingUserParent.role === "HeadTeacher" || existingUserParent.role === "Admin" || existingUserParent.role === "Finance" || existingUserParent.role === "Proprietor") {
                 parentRelation = "Staff Parent";
@@ -632,7 +650,7 @@ const api = {
         action: "CREATE_USER",
         role: newUser.role,
         uid: newUser.uid,
-        name: `${newUser.first_name} ${newUser.last_name}`,
+        name: this.formatFullName(newUser),
         timestamp: new Date().toISOString()
       })
     });
@@ -735,7 +753,7 @@ const api = {
         action: "ARCHIVE_USER",
         user_id: user.user_id,
         uid: user.uid,
-        name: `${user.first_name} ${user.last_name}`,
+        name: this.formatFullName(user),
         timestamp: new Date().toISOString()
       })
     });
@@ -1267,7 +1285,7 @@ const api = {
           user_id: "p-ec-" + stud.user_id,
           uid: "PAR-" + (stud.uid || stud.user_id),
           first_name: parts[0] || "Parent of",
-          last_name: parts.slice(1).join(" ") || `${stud.first_name} ${stud.last_name}`,
+          last_name: parts.slice(1).join(" ") || this.formatFullName(stud),
           phone: ecPhone,
           email: ec?.primary?.email || "",
           role: "Parent",
@@ -1294,7 +1312,7 @@ const api = {
         user_id: "p-stud-" + stud.user_id,
         uid: "PAR-" + (stud.uid || stud.user_id),
         first_name: "Parent/Guardian of",
-        last_name: `${stud.first_name} ${stud.last_name}`,
+        last_name: this.formatFullName(stud),
         phone: stud.phone,
         email: stud.email || "",
         role: "Parent",
@@ -1723,7 +1741,7 @@ const api = {
           type: "BAD_DEBT",
           amount: arrears,
           reference_no: "BD-" + (student && student.uid ? student.uid : studentId),
-          billing_description: `Bad Debt Write-off - Archived Student (${student ? student.first_name + ' ' + student.last_name : studentId})`,
+          billing_description: `Bad Debt Write-off - Archived Student (${student ? this.formatFullName(student) : studentId})`,
           payment_method: "BAD_DEBT_PROVISION",
           timestamp: new Date().toISOString()
         };
@@ -1773,7 +1791,7 @@ const api = {
             type: "REVERSAL",
             amount: Math.abs(bd.amount),
             reference_no: revRef,
-            billing_description: `Reversal of Bad Debt on Account Reactivation (${student ? student.first_name + ' ' + student.last_name : studentId})`,
+            billing_description: `Reversal of Bad Debt on Account Reactivation (${student ? this.formatFullName(student) : studentId})`,
             payment_method: "BAD_DEBT_RECOVERY",
             timestamp: new Date().toISOString()
           };
@@ -1842,7 +1860,7 @@ const api = {
       let teacherName = "Unassigned";
       if (cls.class_teacher_id) {
         const teacher = users.find(u => u.user_id === cls.class_teacher_id);
-        if (teacher) teacherName = `${teacher.first_name} ${teacher.last_name}`;
+        if (teacher) teacherName = this.formatFullName(teacher);
       }
       
       return {
@@ -1998,7 +2016,7 @@ const api = {
         await window.db.put("notifications", {
           notification_id: `notif-grad-${studentId}-${Date.now()}`,
           title: "🎉 Basic Education Graduation (JHS 3)",
-          message: `Congratulations! ${student.first_name} ${student.last_name} (${student.uid}) has completed Junior High School (JHS 3) and officially graduated. Academic records have been archived for official transcripts.`,
+          message: `Congratulations! ${this.formatFullName(student)} (${student.uid}) has completed Junior High School (JHS 3) and officially graduated. Academic records have been archived for official transcripts.`,
           role: "Parent",
           target_user_id: student.user_id,
           target_phone: student.phone || "",
