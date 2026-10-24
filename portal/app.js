@@ -285,6 +285,63 @@ async function getActiveAcademicYear() {
   return "2026/2027";
 }
 
+// Safe score extractor: returns { obtained, max, percentage } or null if invalid/NaN
+function extractValidScore(s) {
+  if (window.api && typeof window.api.extractValidScore === "function") {
+    return window.api.extractValidScore(s);
+  }
+  if (!s || typeof s !== "object") return null;
+  let obtained = null;
+  let max = null;
+  if (s.score_obtained !== undefined && s.score_obtained !== null && s.score_obtained !== "") {
+    const parsed = parseFloat(s.score_obtained);
+    if (!isNaN(parsed) && isFinite(parsed)) obtained = parsed;
+  }
+  if (s.max_score !== undefined && s.max_score !== null && s.max_score !== "") {
+    const parsedMax = parseFloat(s.max_score);
+    if (isNaN(parsedMax) || !isFinite(parsedMax) || parsedMax <= 0) {
+      return null;
+    }
+    max = parsedMax;
+  }
+  if (obtained === null) {
+    if (s.total_score !== undefined && s.total_score !== null && s.total_score !== "") {
+      const parsedTotal = parseFloat(s.total_score);
+      if (!isNaN(parsedTotal) && isFinite(parsedTotal)) {
+        obtained = parsedTotal;
+        if (max === null) max = 100;
+      }
+    } else if (s.class_score !== undefined || s.ca_score !== undefined || s.exam_score !== undefined) {
+      const cls = parseFloat(s.class_score || s.ca_score || 0);
+      const exm = parseFloat(s.exam_score || 0);
+      if (!isNaN(cls) && !isNaN(exm)) {
+        obtained = cls + exm;
+        if (max === null) max = 100;
+      }
+    }
+  }
+  if (obtained === null || isNaN(obtained) || !isFinite(obtained)) return null;
+  if (max === null) max = 100;
+  if (isNaN(max) || !isFinite(max) || max <= 0) return null;
+  const pct = (obtained / max) * 100;
+  if (isNaN(pct) || !isFinite(pct) || pct < 0) return null;
+  return { obtained, max, percentage: pct };
+}
+
+// Safe percentage parser: parses "85%", 85, etc. and returns null if NaN, N/A, or invalid
+function parseValidPercentage(val) {
+  if (window.api && typeof window.api.parseValidPercentage === "function") {
+    return window.api.parseValidPercentage(val);
+  }
+  if (val === null || val === undefined || val === "" || val === "N/A" || val === "NaN" || val === "undefined") {
+    return null;
+  }
+  const clean = String(val).replace(/%/g, "").trim();
+  const num = parseFloat(clean);
+  if (isNaN(num) || !isFinite(num)) return null;
+  return num;
+}
+
 // Generalized Offline Sync for all stores
 async function syncDirtyRecords() {
   if (!window.db) return;
@@ -1146,6 +1203,8 @@ async function loadDashboardSubview(subviewId, pushToHistory = true) {
   }
 }
 
+
+
 function generateAuditHash(action, details, prevHash = "genesis_block_fb_international") {
   const payload = action + JSON.stringify(details) + prevHash + Date.now().toString();
   let hash = 0;
@@ -1669,21 +1728,23 @@ async function renderProprietorDash(container) {
       }
     });
 
-    // Academic & Attendance quality metrics from master registry profiles
-    const validScores = profiles.map(p => {
-      const s = p.cummulative_academic_score;
-      if (s === null || s === undefined || s === "" || s === "N/A") return null;
-      const num = parseFloat(String(s).replace("%", ""));
-      return isNaN(num) ? null : num;
-    }).filter(n => n !== null);
-    const schoolAcadAvg = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1) + "%" : "N/A";
+    // Academic & Attendance quality metrics: checks continuous scores first, falls back to valid profiles
+    const allScores = await window.db.getAll("student_scores") || [];
+    const activeValidScores = allScores.map(s => extractValidScore(s)).filter(v => v !== null && !isNaN(v.percentage));
+    let schoolAcadAvg = "N/A";
+    if (activeValidScores.length > 0) {
+      const sum = activeValidScores.reduce((a, b) => a + b.percentage, 0);
+      schoolAcadAvg = (sum / activeValidScores.length).toFixed(1) + "%";
+    } else {
+      const validScores = profiles
+        .map(p => parseValidPercentage(p.cummulative_academic_score))
+        .filter(n => n !== null);
+      schoolAcadAvg = validScores.length > 0 ? (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(1) + "%" : "N/A";
+    }
 
-    const validAtts = profiles.map(p => {
-      const a = p.cummulative_attendance;
-      if (a === null || a === undefined || a === "" || a === "N/A") return null;
-      const num = parseFloat(String(a).replace("%", ""));
-      return isNaN(num) ? null : num;
-    }).filter(n => n !== null);
+    const validAtts = profiles
+      .map(p => parseValidPercentage(p.cummulative_attendance))
+      .filter(n => n !== null);
     const schoolAttAvg = validAtts.length > 0 ? (validAtts.reduce((a, b) => a + b, 0) / validAtts.length).toFixed(1) + "%" : "N/A";
 
     // Financial balance calculations
@@ -7628,10 +7689,13 @@ async function renderFeeLedger(container) {
             <td>${displayMethod}</td>
             <td>GH¢ ${t.amount.toFixed(2)}</td>
             <td>${t.recorded_by === currentUser.user_id ? "Self" : "Officer"}</td>
-            <td>
-              ${t.type !== "REVERSAL" ? `
-                <button class="btn btn-secondary btn-reverse-tx" data-id="${t.transaction_id}" data-amount="${t.amount}" data-ref="${t.reference_no}" style="min-height:26px; padding:0 0.4rem; font-size:0.75rem; border-color:var(--accent-warning); color:var(--accent-warning);">Reverse</button>
-              ` : `<span style="font-size:0.75rem; color:var(--text-muted)">Balanced</span>`}
+            <td style="white-space:nowrap;">
+              <div style="display:flex; gap:0.35rem; align-items:center;">
+                ${t.type !== "REVERSAL" ? `
+                  <button class="btn btn-secondary btn-reverse-tx" data-id="${t.transaction_id}" data-amount="${t.amount}" data-ref="${t.reference_no}" style="min-height:26px; padding:0 0.45rem; font-size:0.75rem; border-color:var(--accent-warning); color:var(--accent-warning);" title="Post balancing reversal entry">Reverse</button>
+                ` : `<span style="font-size:0.75rem; color:var(--text-muted); margin-right:0.25rem;">Balanced</span>`}
+                <button class="btn btn-secondary btn-delete-tx" data-id="${t.transaction_id}" data-amount="${t.amount}" data-ref="${t.reference_no}" data-type="${t.type}" style="min-height:26px; padding:0 0.45rem; font-size:0.75rem; border-color:var(--accent-danger); color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Permanently delete this entry from student ledger">🗑️ Delete</button>
+              </div>
             </td>
           </tr>
         `;
@@ -7690,6 +7754,59 @@ async function renderFeeLedger(container) {
           } catch (err) {
             console.error("Reversal execution error:", err);
             showToast("Failed to post reversal", "danger");
+          }
+        });
+      });
+
+      // Delete individual wrong entry Hook
+      rowsBody.querySelectorAll(".btn-delete-tx").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const txId = btn.getAttribute("data-id");
+          const amt = parseFloat(btn.getAttribute("data-amount"));
+          const ref = btn.getAttribute("data-ref") || "N/A";
+          const type = btn.getAttribute("data-type") || "ENTRY";
+
+          const confirmed = confirm(
+            `Delete this transaction entry permanently from ${studentName}'s account?\n\n` +
+            `• Reference: ${ref}\n` +
+            `• Type: ${type}\n` +
+            `• Amount: GH¢ ${Math.abs(amt).toFixed(2)}\n\n` +
+            `This will remove the entry from the student's ledger and automatically recalculate their total billed, paid, and arrears.`
+          );
+
+          if (!confirmed) return;
+
+          try {
+            btn.disabled = true;
+            btn.textContent = "...";
+            await window.db.delete("financial_transactions", txId);
+
+            try {
+              await window.db.put("audit_logs", {
+                audit_id: "a-audit-del-" + Date.now(),
+                timestamp: new Date().toISOString(),
+                action_details: JSON.stringify({
+                  action: "LEDGER_ENTRY_DELETED",
+                  deleted_by: currentUser.uid || currentUser.user_id,
+                  transaction_id: txId,
+                  student_id: studentId,
+                  reference_no: ref,
+                  amount: amt,
+                  type: type
+                })
+              });
+            } catch (auditErr) {}
+
+            showToast(`Entry (${ref}) deleted successfully. Ledger balances updated.`, "success");
+            await loadStudentHistory(studentId, studentName);
+            if (typeof loadLedgerList === "function") {
+              await loadLedgerList();
+            }
+          } catch (err) {
+            console.error("Delete transaction error:", err);
+            showToast("Failed to delete transaction: " + err.message, "danger");
+            btn.disabled = false;
+            btn.textContent = "🗑️ Delete";
           }
         });
       });
@@ -8987,6 +9104,8 @@ async function renderTeacherAttendance(container) {
         saveBtn.innerText = "Submitting Attendance...";
 
         try {
+          const activeYear = await getActiveAcademicYear();
+          const records = [];
           for (const select of selects) {
             const studentId = select.getAttribute("data-user-id");
             const status = select.value;
@@ -8998,10 +9117,12 @@ async function renderTeacherAttendance(container) {
               marked_by: currentUser.user_id,
               date: dateStr,
               status: status,
+              academic_year: activeYear,
               synced: isOnline // Saved locally first, flagged unsynced if offline
             };
-            await window.db.put("attendance", record);
+            records.push(record);
           }
+          await window.db.putBatch("attendance", records);
 
           if (isOnline) {
             showToast("Daily attendance roster synchronized successfully!", "success");
@@ -11696,7 +11817,8 @@ async function renderStudentDash(container) {
     }
 
     const myScores = scores.filter(s => s.student_id === currentUser.user_id);
-    const avgScore = myScores.length > 0 ? ((myScores.reduce((sum, s) => sum + (s.score_obtained / s.max_score), 0) / myScores.length) * 100).toFixed(0) : 100;
+    const validMyScores = myScores.map(s => extractValidScore(s)).filter(v => v !== null && !isNaN(v.percentage));
+    const avgScore = validMyScores.length > 0 ? (validMyScores.reduce((sum, v) => sum + v.percentage, 0) / validMyScores.length).toFixed(0) : 100;
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
@@ -12219,9 +12341,12 @@ async function renderAcademicQuality(container) {
     const attendance = await window.db.getAll("attendance");
     const classes = await window.db.getAll("classes");
 
-    const currentYear = new Date().getFullYear();
-    const defaultStart = `${currentYear}-01-01`;
-    const defaultEnd = new Date().toISOString().substring(0, 10);
+    const activeRange = window.api && window.api.getAcademicYearDateRange 
+      ? window.api.getAcademicYearDateRange("2026/2027") 
+      : { startDate: "2026-09-01", endDate: "2027-07-31" };
+    const today = new Date().toISOString().substring(0, 10);
+    const defaultStart = activeRange.startDate;
+    const defaultEnd = today;
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
@@ -12230,7 +12355,14 @@ async function renderAcademicQuality(container) {
             <h2>Academic Analytics & Supervision</h2>
             <p style="color:var(--text-secondary);">Evaluate school-wide student academic averages and track overall attendance analytics</p>
           </div>
-          <div style="display:flex; gap:1rem; align-items:center;">
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <select id="acad-year-filter" class="form-control" style="min-height:30px; padding:0 0.5rem; font-size:0.8rem; width:190px;">
+              <option value="CURRENT" selected>Current Year (2026/2027) [In Focus]</option>
+              <option value="2025/2026">2025/2026 (Past History)</option>
+              <option value="2024/2025">2024/2025 (Past History)</option>
+              <option value="ALL">All Recorded History</option>
+              <option value="CUSTOM">Custom Date Period...</option>
+            </select>
             <div style="display:flex; gap:0.5rem; align-items:center; background:var(--bg-secondary); padding:0.5rem 1rem; border-radius:8px; border:1px solid var(--border-color);">
               <label style="font-size:0.8rem; font-weight:600;">Period:</label>
               <input type="date" id="acad-start-date" class="form-control" style="width:130px; min-height:30px; padding:0 0.5rem; font-size:0.8rem;" value="${defaultStart}">
@@ -12447,6 +12579,8 @@ async function renderAcademicQuality(container) {
     let activeStudents = [];
     let rangeScores = [];
 
+    const yearFilter = document.getElementById("acad-year-filter");
+
     function processPerformanceData() {
       const startVal = startInput.value;
       const endVal = endInput.value;
@@ -12456,27 +12590,38 @@ async function renderAcademicQuality(container) {
       const endDate = new Date(endVal);
       endDate.setHours(23, 59, 59);
 
-      // Filter scores in range
+      const yVal = yearFilter ? yearFilter.value : "CURRENT";
+
+      // Filter scores in range & academic year
       rangeScores = scores.filter(s => {
-        const d = new Date(s.created_at || s.timestamp);
+        if (yVal === "CURRENT" && s.academic_year && s.academic_year !== "2026/2027") return false;
+        if (yVal === "2025/2026" && s.academic_year && s.academic_year !== "2025/2026") return false;
+        if (yVal === "2024/2025" && s.academic_year && s.academic_year !== "2024/2025") return false;
+        const d = new Date(s.created_at || s.timestamp || s.date || 0);
         return d >= startDate && d <= endDate;
       });
 
       activeStudents = users.filter(u => u.role === "Student" && u.status === "ACTIVE" && enrolments.some(e => e.student_id === u.user_id));
 
-      // Calculate School Average (from period scores or cumulative profile records)
-      if (rangeScores.length > 0) {
-        const sum = rangeScores.reduce((acc, s) => acc + (s.score_obtained / s.max_score), 0);
-        const avg = (sum / rangeScores.length) * 100;
+      // Calculate School Average defensively (ignoring NaN, N/A, and invalid records)
+      const validRangeScores = rangeScores
+        .map(s => extractValidScore(s))
+        .filter(v => v !== null && !isNaN(v.percentage));
+
+      if (validRangeScores.length > 0) {
+        const sum = validRangeScores.reduce((acc, v) => acc + v.percentage, 0);
+        const avg = sum / validRangeScores.length;
         document.getElementById("acad-school-avg-badge").innerText = `${avg.toFixed(1)}%`;
-        document.getElementById("acad-school-avg-bar").style.width = `${avg}%`;
+        document.getElementById("acad-school-avg-bar").style.width = `${Math.min(100, Math.max(0, avg))}%`;
       } else {
-        const validAcadProfiles = profiles.filter(p => p.cummulative_academic_score !== null && p.cummulative_academic_score !== undefined);
+        const validAcadProfiles = profiles
+          .map(p => parseValidPercentage(p.cummulative_academic_score))
+          .filter(v => v !== null && !isNaN(v));
         if (validAcadProfiles.length > 0) {
-          const sum = validAcadProfiles.reduce((acc, p) => acc + parseFloat(p.cummulative_academic_score), 0);
+          const sum = validAcadProfiles.reduce((acc, v) => acc + v, 0);
           const avg = sum / validAcadProfiles.length;
           document.getElementById("acad-school-avg-badge").innerText = `${avg.toFixed(1)}%`;
-          document.getElementById("acad-school-avg-bar").style.width = `${Math.min(100, avg)}%`;
+          document.getElementById("acad-school-avg-bar").style.width = `${Math.min(100, Math.max(0, avg))}%`;
         } else {
           document.getElementById("acad-school-avg-badge").innerText = "N/A";
           document.getElementById("acad-school-avg-bar").style.width = "0%";
@@ -12491,28 +12636,31 @@ async function renderAcademicQuality(container) {
         const classEnrols = validEnrolments.filter(e => e.class_id === c.class_id);
         const classStudIds = classEnrols.map(e => e.student_id);
         const classScores = rangeScores.filter(s => classStudIds.includes(s.student_id));
+        const validClassScores = classScores.map(s => extractValidScore(s)).filter(v => v !== null && !isNaN(v.percentage));
 
         let avgStr = "N/A";
-        let submissions = classScores.length > 0 ? `${classScores.length} submissions` : "0 submissions";
+        let submissions = validClassScores.length > 0 ? `${validClassScores.length} submissions` : "0 submissions";
         let highest = "N/A";
         let lowest = "N/A";
 
-        if (classScores.length > 0) {
-          const sum = classScores.reduce((acc, s) => acc + (s.score_obtained / s.max_score), 0);
-          avgStr = `${((sum / classScores.length) * 100).toFixed(1)}%`;
-          const percentages = classScores.map(s => (s.score_obtained / s.max_score) * 100);
+        if (validClassScores.length > 0) {
+          const sum = validClassScores.reduce((acc, v) => acc + v.percentage, 0);
+          const avg = sum / validClassScores.length;
+          avgStr = `${avg.toFixed(1)}%`;
+          const percentages = validClassScores.map(v => v.percentage);
           highest = `${Math.max(...percentages).toFixed(1)}%`;
           lowest = `${Math.min(...percentages).toFixed(1)}%`;
         } else {
           // Fallback to official cumulative academic scores from profiles
-          const cProfs = profiles.filter(p => classStudIds.includes(p.user_id) && p.cummulative_academic_score !== null && p.cummulative_academic_score !== undefined);
-          if (cProfs.length > 0) {
-            const sum = cProfs.reduce((acc, p) => acc + parseFloat(p.cummulative_academic_score), 0);
-            avgStr = `${(sum / cProfs.length).toFixed(1)}%`;
-            submissions = `${cProfs.length} students (cumulative)`;
-            const pScores = cProfs.map(p => parseFloat(p.cummulative_academic_score));
-            highest = `${Math.max(...pScores).toFixed(1)}%`;
-            lowest = `${Math.min(...pScores).toFixed(1)}%`;
+          const cProfs = profiles.filter(p => classStudIds.includes(p.user_id));
+          const validProfScores = cProfs.map(p => parseValidPercentage(p.cummulative_academic_score)).filter(v => v !== null && !isNaN(v));
+          if (validProfScores.length > 0) {
+            const sum = validProfScores.reduce((acc, v) => acc + v, 0);
+            const avg = sum / validProfScores.length;
+            avgStr = `${avg.toFixed(1)}%`;
+            submissions = `${validProfScores.length} students (cumulative)`;
+            highest = `${Math.max(...validProfScores).toFixed(1)}%`;
+            lowest = `${Math.min(...validProfScores).toFixed(1)}%`;
           }
         }
 
@@ -12554,22 +12702,23 @@ async function renderAcademicQuality(container) {
 
       studentsRows.innerHTML = classStuds.map(s => {
         const sScores = rangeScores.filter(x => x.student_id === s.user_id);
+        const validScores = sScores.map(x => extractValidScore(x)).filter(v => v !== null && !isNaN(v.percentage));
         let avgStr = "N/A";
         let scorePct = 0;
         let countDisplay = "0 graded";
 
-        if (sScores.length > 0) {
-          const sum = sScores.reduce((acc, x) => acc + (x.score_obtained / x.max_score), 0);
-          scorePct = sum / sScores.length;
-          avgStr = `${(scorePct * 100).toFixed(1)}%`;
-          countDisplay = `${sScores.length} tests`;
+        if (validScores.length > 0) {
+          const sum = validScores.reduce((acc, x) => acc + x.percentage, 0);
+          scorePct = (sum / validScores.length) / 100;
+          avgStr = `${(sum / validScores.length).toFixed(1)}%`;
+          countDisplay = `${validScores.length} tests`;
         } else {
           // Fallback to student cumulative profile record
           const prof = profiles.find(p => p.user_id === s.user_id);
-          if (prof && prof.cummulative_academic_score !== null && prof.cummulative_academic_score !== undefined) {
-            const val = parseFloat(prof.cummulative_academic_score);
-            scorePct = val / 100;
-            avgStr = `${val.toFixed(1)}%`;
+          const parsed = prof ? parseValidPercentage(prof.cummulative_academic_score) : null;
+          if (parsed !== null && !isNaN(parsed)) {
+            scorePct = parsed / 100;
+            avgStr = `${parsed.toFixed(1)}%`;
             countDisplay = `<span class="badge badge-info" style="font-size:0.75rem;">Cumulative Score</span>`;
           }
         }
@@ -12605,8 +12754,13 @@ async function renderAcademicQuality(container) {
       const endDate = new Date(endVal);
       endDate.setHours(23, 59, 59);
 
+      const yVal = yearFilter ? yearFilter.value : "CURRENT";
+
       const allAttendance = await window.db.getAll("attendance");
       const rangeAttendance = allAttendance.filter(a => {
+        if (yVal === "CURRENT" && a.academic_year && a.academic_year !== "2026/2027") return false;
+        if (yVal === "2025/2026" && a.academic_year && a.academic_year !== "2025/2026") return false;
+        if (yVal === "2024/2025" && a.academic_year && a.academic_year !== "2024/2025") return false;
         const d = new Date(a.date);
         return d >= startDate && d <= endDate;
       });
@@ -12628,9 +12782,12 @@ async function renderAcademicQuality(container) {
         document.getElementById("attend-school-avg-badge").innerText = avgRate;
       } else {
         // Fallback to cumulative attendance from student profiles
-        const validAttProfiles = profiles.filter(p => studentUserIds.includes(p.user_id) && p.cummulative_attendance !== null && p.cummulative_attendance !== undefined);
+        const validAttProfiles = profiles
+          .filter(p => studentUserIds.includes(p.user_id))
+          .map(p => parseValidPercentage(p.cummulative_attendance))
+          .filter(v => v !== null && !isNaN(v));
         if (validAttProfiles.length > 0) {
-          const sumAtt = validAttProfiles.reduce((acc, p) => acc + parseFloat(p.cummulative_attendance), 0);
+          const sumAtt = validAttProfiles.reduce((acc, v) => acc + v, 0);
           const overallAvg = sumAtt / validAttProfiles.length;
           document.getElementById("attend-school-avg-badge").innerText = `${overallAvg.toFixed(1)}%`;
           const presEst = Math.round(validAttProfiles.length * (overallAvg / 100));
@@ -12695,7 +12852,10 @@ async function renderAcademicQuality(container) {
         const total = classAtt.length;
 
         // Fallback to cumulative attendance from student profiles if no attendance logs in range
-        const classProfiles = profiles.filter(p => classStudIds.includes(p.user_id) && p.cummulative_attendance !== null && p.cummulative_attendance !== undefined);
+        const classProfiles = profiles.filter(p => classStudIds.includes(p.user_id));
+        const validClassAtts = classProfiles
+          .map(p => parseValidPercentage(p.cummulative_attendance))
+          .filter(v => v !== null && !isNaN(v));
         let presPct = "0%";
         let latePct = "0%";
         let absPct = "0%";
@@ -12707,12 +12867,12 @@ async function renderAcademicQuality(container) {
           latePct = ((late / total) * 100).toFixed(0) + "%";
           absPct = ((abs / total) * 100).toFixed(0) + "%";
           excPct = ((exc / total) * 100).toFixed(0) + "%";
-        } else if (classProfiles.length > 0) {
-          const sumAtt = classProfiles.reduce((acc, p) => acc + parseFloat(p.cummulative_attendance), 0);
-          const avgAtt = sumAtt / classProfiles.length;
+        } else if (validClassAtts.length > 0) {
+          const sumAtt = validClassAtts.reduce((acc, v) => acc + v, 0);
+          const avgAtt = sumAtt / validClassAtts.length;
           presPct = `${avgAtt.toFixed(1)}%`;
           absPct = `${(100 - avgAtt).toFixed(1)}%`;
-          recordsText = `${classProfiles.length} students enrolled`;
+          recordsText = `${validClassAtts.length} students enrolled`;
         }
 
         return `
@@ -12759,7 +12919,7 @@ async function renderAcademicQuality(container) {
         const total = sAtt.length;
 
         const sProf = profiles.find(p => p.user_id === s.user_id);
-        const cummAtt = sProf?.cummulative_attendance;
+        const cummAtt = sProf ? parseValidPercentage(sProf.cummulative_attendance) : null;
         
         let rate = "100%";
         let displayPres = pres;
@@ -12769,11 +12929,10 @@ async function renderAcademicQuality(container) {
 
         if (total > 0) {
           rate = (((pres + late) / total) * 100).toFixed(0) + "%";
-        } else if (cummAtt !== null && cummAtt !== undefined) {
-          const num = parseFloat(cummAtt);
-          rate = `${num.toFixed(1)}%`;
-          displayPres = `${num.toFixed(1)}%`;
-          displayAbs = `${(100 - num).toFixed(1)}%`;
+        } else if (cummAtt !== null && !isNaN(cummAtt)) {
+          rate = `${cummAtt.toFixed(1)}%`;
+          displayPres = `${cummAtt.toFixed(1)}%`;
+          displayAbs = `${(100 - cummAtt).toFixed(1)}%`;
           displayLate = "-";
           displayExc = "-";
         }
@@ -12816,7 +12975,7 @@ async function renderAcademicQuality(container) {
 
       const sLogs = rangeAttendance.filter(a => a.user_id === studentId).sort((a, b) => new Date(b.date) - new Date(a.date));
       const sProf = profiles.find(p => p.user_id === studentId);
-      const cummAtt = sProf?.cummulative_attendance;
+      const cummAtt = sProf ? parseValidPercentage(sProf.cummulative_attendance) : null;
 
       if (sLogs.length > 0) {
         rowsBody.innerHTML = sLogs.map(l => {
@@ -12830,13 +12989,13 @@ async function renderAcademicQuality(container) {
             </tr>
           `;
         }).join("");
-      } else if (cummAtt !== null && cummAtt !== undefined) {
+      } else if (cummAtt !== null && !isNaN(cummAtt)) {
         rowsBody.innerHTML = `
           <tr>
             <td>Official Academic Registry</td>
             <td><span class="badge badge-success">RECORDED</span></td>
             <td>Official School Records</td>
-            <td><strong>Official Cumulative Attendance: ${cummAtt}%</strong> (Loaded from school master registry)</td>
+            <td><strong>Official Cumulative Attendance: ${cummAtt.toFixed(1)}%</strong> (Loaded from school master registry)</td>
           </tr>
         `;
       } else {
@@ -12848,13 +13007,37 @@ async function renderAcademicQuality(container) {
       };
     }
 
+    if (yearFilter) {
+      yearFilter.addEventListener("change", () => {
+        const val = yearFilter.value;
+        if (val === "CURRENT") {
+          startInput.value = activeRange.startDate;
+          endInput.value = today;
+        } else if (val === "2025/2026") {
+          startInput.value = "2025-09-01";
+          endInput.value = "2026-07-31";
+        } else if (val === "2024/2025") {
+          startInput.value = "2024-09-01";
+          endInput.value = "2025-07-31";
+        } else if (val === "ALL") {
+          startInput.value = "2020-01-01";
+          endInput.value = today;
+        }
+        processPerformanceData();
+        if (!classesCard.classList.contains("portal-hidden")) renderClassesBreakdown();
+        if (!riskContent.classList.contains("portal-hidden")) renderAttendanceAnalytics();
+      });
+    }
+
     startInput.addEventListener("change", () => {
+      if (yearFilter) yearFilter.value = "CUSTOM";
       processPerformanceData();
       if (!classesCard.classList.contains("portal-hidden")) renderClassesBreakdown();
       if (!riskContent.classList.contains("portal-hidden")) renderAttendanceAnalytics();
     });
 
     endInput.addEventListener("change", () => {
+      if (yearFilter) yearFilter.value = "CUSTOM";
       processPerformanceData();
       if (!classesCard.classList.contains("portal-hidden")) renderClassesBreakdown();
       if (!riskContent.classList.contains("portal-hidden")) renderAttendanceAnalytics();
@@ -12879,8 +13062,12 @@ async function renderAttendanceTracker(container) {
     const profiles = await window.db.getAll("profiles");
     const attendance = await window.db.getAll("attendance");
 
-    const defaultStart = "2026-08-10";
-    const defaultEnd = "2026-08-26";
+    const activeRange = window.api && window.api.getAcademicYearDateRange 
+      ? window.api.getAcademicYearDateRange("2026/2027") 
+      : { startDate: "2026-09-01", endDate: "2027-07-31" };
+    const today = new Date().toISOString().substring(0, 10);
+    const defaultStart = activeRange.startDate;
+    const defaultEnd = today;
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
@@ -12889,11 +13076,20 @@ async function renderAttendanceTracker(container) {
             <h2>Institutional Attendance Tracker</h2>
             <p style="color:var(--text-secondary);">Monitor student and staff daily attendance logs and compliance rates</p>
           </div>
-          <div style="display:flex; gap:0.5rem; align-items:center; background:var(--bg-secondary); padding:0.5rem 1rem; border-radius:8px; border:1px solid var(--border-color);">
-            <label style="font-size:0.8rem; font-weight:600;">Range:</label>
-            <input type="date" id="tracker-start-date" class="form-control" style="width:130px; min-height:30px; padding:0 0.5rem; font-size:0.8rem;" value="${defaultStart}">
-            <span>to</span>
-            <input type="date" id="tracker-end-date" class="form-control" style="width:130px; min-height:30px; padding:0 0.5rem; font-size:0.8rem;" value="${defaultEnd}">
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <select id="tracker-year-filter" class="form-control" style="min-height:30px; padding:0 0.5rem; font-size:0.8rem; width:190px;">
+              <option value="CURRENT" selected>Current Year (2026/2027) [In Focus]</option>
+              <option value="2025/2026">2025/2026 (Past History)</option>
+              <option value="2024/2025">2024/2025 (Past History)</option>
+              <option value="ALL">All Recorded History</option>
+              <option value="CUSTOM">Custom Date Period...</option>
+            </select>
+            <div style="display:flex; gap:0.5rem; align-items:center; background:var(--bg-secondary); padding:0.5rem 1rem; border-radius:8px; border:1px solid var(--border-color);">
+              <label style="font-size:0.8rem; font-weight:600;">Range:</label>
+              <input type="date" id="tracker-start-date" class="form-control" style="width:130px; min-height:30px; padding:0 0.5rem; font-size:0.8rem;" value="${defaultStart}">
+              <span>to</span>
+              <input type="date" id="tracker-end-date" class="form-control" style="width:130px; min-height:30px; padding:0 0.5rem; font-size:0.8rem;" value="${defaultEnd}">
+            </div>
           </div>
         </div>
 
@@ -13041,6 +13237,8 @@ async function renderAttendanceTracker(container) {
     let studentDataFiltered = [];
     let staffDataFiltered = [];
 
+    const trackerYearFilter = document.getElementById("tracker-year-filter");
+
     function processAttendance() {
       const startVal = startInput.value;
       const endVal = endInput.value;
@@ -13050,7 +13248,12 @@ async function renderAttendanceTracker(container) {
       const endDate = new Date(endVal);
       endDate.setHours(23, 59, 59);
 
+      const yVal = trackerYearFilter ? trackerYearFilter.value : "CURRENT";
+
       const rangeAtt = attendance.filter(a => {
+        if (yVal === "CURRENT" && a.academic_year && a.academic_year !== "2026/2027") return false;
+        if (yVal === "2025/2026" && a.academic_year && a.academic_year !== "2025/2026") return false;
+        if (yVal === "2024/2025" && a.academic_year && a.academic_year !== "2024/2025") return false;
         const d = new Date(a.date);
         return d >= startDate && d <= endDate;
       });
@@ -13069,9 +13272,9 @@ async function renderAttendanceTracker(container) {
       const studE = studAtt.filter(a => a.status === "EXCUSED").length;
       const studTotal = studAtt.length;
 
-      const studPresRate = studTotal > 0 ? ((studP + studL) / studTotal) * 100 : 100;
-      const studAbsRate = studTotal > 0 ? (studA / studTotal) * 100 : 0;
-      const studExcRate = studTotal > 0 ? (studE / studTotal) * 100 : 0;
+      const studPresRate = studTotal > 0 ? Math.min(100, Math.max(0, ((studP + studL) / studTotal) * 100)) : 100;
+      const studAbsRate = studTotal > 0 ? Math.min(100, Math.max(0, (studA / studTotal) * 100)) : 0;
+      const studExcRate = studTotal > 0 ? Math.min(100, Math.max(0, (studE / studTotal) * 100)) : 0;
 
       studChartCont.innerHTML = renderVisualProgressBars(studPresRate, studAbsRate, studExcRate, studTotal);
 
@@ -13085,9 +13288,9 @@ async function renderAttendanceTracker(container) {
       const staffE = staffAtt.filter(a => a.status === "EXCUSED").length;
       const staffTotal = staffAtt.length;
 
-      const staffPresRate = staffTotal > 0 ? ((staffP + staffL) / staffTotal) * 100 : 100;
-      const staffAbsRate = staffTotal > 0 ? (staffA / staffTotal) * 100 : 0;
-      const staffExcRate = staffTotal > 0 ? (staffE / staffTotal) * 100 : 0;
+      const staffPresRate = staffTotal > 0 ? Math.min(100, Math.max(0, ((staffP + staffL) / staffTotal) * 100)) : 100;
+      const staffAbsRate = staffTotal > 0 ? Math.min(100, Math.max(0, (staffA / staffTotal) * 100)) : 0;
+      const staffExcRate = staffTotal > 0 ? Math.min(100, Math.max(0, (staffE / staffTotal) * 100)) : 0;
 
       staffChartCont.innerHTML = renderVisualProgressBars(staffPresRate, staffAbsRate, staffExcRate, staffTotal);
 
@@ -13304,8 +13507,34 @@ async function renderAttendanceTracker(container) {
       }).join("");
     }
 
-    startInput.addEventListener("change", processAttendance);
-    endInput.addEventListener("change", processAttendance);
+    if (trackerYearFilter) {
+      trackerYearFilter.addEventListener("change", () => {
+        const val = trackerYearFilter.value;
+        if (val === "CURRENT") {
+          startInput.value = activeRange.startDate;
+          endInput.value = today;
+        } else if (val === "2025/2026") {
+          startInput.value = "2025-09-01";
+          endInput.value = "2026-07-31";
+        } else if (val === "2024/2025") {
+          startInput.value = "2024-09-01";
+          endInput.value = "2025-07-31";
+        } else if (val === "ALL") {
+          startInput.value = "2020-01-01";
+          endInput.value = today;
+        }
+        processAttendance();
+      });
+    }
+
+    startInput.addEventListener("change", () => {
+      if (trackerYearFilter) trackerYearFilter.value = "CUSTOM";
+      processAttendance();
+    });
+    endInput.addEventListener("change", () => {
+      if (trackerYearFilter) trackerYearFilter.value = "CUSTOM";
+      processAttendance();
+    });
 
     processAttendance();
     window._refreshAttendanceTracker = () => renderAttendanceTracker(container);
@@ -14150,6 +14379,7 @@ async function renderRecordsManagement(container) {
                       <th>Type</th>
                       <th>Payment Method</th>
                       <th>Amount</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody id="profile-financial-rows">
@@ -15611,91 +15841,157 @@ async function renderRecordsManagement(container) {
         if (document.getElementById("btn-pm-tab-context")) {
           document.getElementById("btn-pm-tab-context").innerText = "📊 Academic & Grades";
         }
-        
-        const pres = userAtt.filter(x => x.status === "PRESENT").length;
-        const late = userAtt.filter(x => x.status === "LATE").length;
-        const abs = userAtt.filter(x => x.status === "ABSENT").length;
-        const exc = userAtt.filter(x => x.status === "EXCUSED").length;
-        const total = userAtt.length;
-        const attRate = total > 0 ? (((pres + late) / total) * 100).toFixed(0) + "%" : "100%";
 
-        const cummAtt = p.cummulative_attendance ? (String(p.cummulative_attendance).includes("%") ? p.cummulative_attendance : p.cummulative_attendance + "%") : null;
-        const cummAcad = p.cummulative_academic_score ? (String(p.cummulative_academic_score).includes("%") ? p.cummulative_academic_score : p.cummulative_academic_score + "%") : null;
+        const renderStudentAcademicPanel = (selectedYear = "CURRENT") => {
+          const activeYear = "2026/2027";
+          let filteredScores = studScores;
+          let filteredAtt = userAtt;
 
-        const averagePct = studScores.length > 0 ? 
-          (studScores.reduce((sum, s) => sum + (s.score_obtained / s.max_score), 0) / studScores.length * 100).toFixed(1) + "%" : 
-          (cummAcad || "N/A");
-
-        const displayAttRecord = total > 0 
-          ? `${pres + late} out of ${total} days (${attRate})` 
-          : (cummAtt ? `${cummAtt} (Cumulative Master Registry)` : "100%");
-
-        const displayAttBreakdown = total > 0
-          ? `Present: <strong>${pres}</strong> | Late: <strong>${late}</strong> | Absent: <strong>${abs}</strong> | Excused: <strong>${exc}</strong>`
-          : (cummAtt ? `Cumulative Master Attendance Rate: <strong>${cummAtt}</strong>` : `Present: <strong>0</strong> | Late: <strong>0</strong> | Absent: <strong>0</strong> | Excused: <strong>0</strong>`);
-
-        // Group scores by subject_id to calculate individual subject average scores
-        const subjectScoresMap = {};
-        studScores.forEach(sc => {
-          const sId = sc.subject_id || "general";
-          if (!subjectScoresMap[sId]) {
-            const sName = subjNameMap.get(sId) || sc.subject_name || "General Subject";
-            subjectScoresMap[sId] = { name: sName, scores: [] };
+          if (selectedYear === "CURRENT") {
+            filteredScores = studScores.filter(s => {
+              if (s.academic_year) return s.academic_year === activeYear;
+              const d = new Date(s.created_at || s.timestamp || 0);
+              return d >= new Date("2026-09-01");
+            });
+            filteredAtt = userAtt.filter(a => {
+              if (a.academic_year) return a.academic_year === activeYear;
+              const d = new Date(a.date);
+              return d >= new Date("2026-09-01");
+            });
+            // If current year has no continuous scores yet, allow all scores for reference
+            if (filteredScores.length === 0 && studScores.length > 0) {
+              filteredScores = studScores;
+            }
+          } else if (selectedYear === "2025/2026") {
+            filteredScores = studScores.filter(s => {
+              if (s.academic_year) return s.academic_year === "2025/2026";
+              const d = new Date(s.created_at || s.timestamp || 0);
+              return d >= new Date("2025-09-01") && d < new Date("2026-09-01");
+            });
+            filteredAtt = userAtt.filter(a => {
+              if (a.academic_year) return a.academic_year === "2025/2026";
+              const d = new Date(a.date);
+              return d >= new Date("2025-09-01") && d < new Date("2026-09-01");
+            });
           }
-          if (sc.score_obtained !== undefined && sc.max_score) {
-            subjectScoresMap[sId].scores.push((sc.score_obtained / sc.max_score) * 100);
-          } else if (sc.total_score !== undefined) {
-            subjectScoresMap[sId].scores.push(sc.total_score);
+          
+          const pres = filteredAtt.filter(x => x.status === "PRESENT").length;
+          const late = filteredAtt.filter(x => x.status === "LATE").length;
+          const abs = filteredAtt.filter(x => x.status === "ABSENT").length;
+          const exc = filteredAtt.filter(x => x.status === "EXCUSED").length;
+          const total = filteredAtt.length;
+          const attRate = total > 0 ? (((pres + late) / total) * 100).toFixed(0) + "%" : "100%";
+
+          const parsedCummAtt = parseValidPercentage(p.cummulative_attendance);
+          const cummAtt = parsedCummAtt !== null ? `${parsedCummAtt.toFixed(1)}%` : null;
+
+          const parsedCummAcad = parseValidPercentage(p.cummulative_academic_score);
+          const cummAcad = parsedCummAcad !== null ? `${parsedCummAcad.toFixed(1)}%` : null;
+
+          const validScores = filteredScores
+            .map(s => extractValidScore(s))
+            .filter(v => v !== null && !isNaN(v.percentage));
+
+          let averagePct = "N/A";
+          if (validScores.length > 0) {
+            const sum = validScores.reduce((acc, v) => acc + v.percentage, 0);
+            averagePct = `${(sum / validScores.length).toFixed(1)}%`;
+          } else if (cummAcad) {
+            averagePct = cummAcad;
           }
-        });
 
-        const subjectAverageList = Object.keys(subjectScoresMap).map(sId => {
-          const item = subjectScoresMap[sId];
-          const avg = item.scores.length > 0 
-            ? (item.scores.reduce((a, b) => a + b, 0) / item.scores.length).toFixed(1) 
-            : "0.0";
-          return { id: sId, name: item.name, average: avg };
-        });
+          const displayAttRecord = total > 0 
+            ? `${pres + late} out of ${total} days (${attRate})` 
+            : (cummAtt ? `${cummAtt} (Cumulative Master Registry)` : "100%");
 
-        document.getElementById("profile-right-panel-content").innerHTML = `
-          <div style="display:flex; flex-direction:column; gap:0.5rem;">
-            <div class="profile-info-pill" style="flex-direction:column; align-items:flex-start; gap:0.4rem;">
-              <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
-                <span class="pill-label">Grade Average (Overall):</span>
-                <span class="pill-value" style="color:var(--accent-primary); font-size:1.05rem; font-weight:800;">${averagePct}</span>
+          const displayAttBreakdown = total > 0
+            ? `Present: <strong>${pres}</strong> | Late: <strong>${late}</strong> | Absent: <strong>${abs}</strong> | Excused: <strong>${exc}</strong>`
+            : (cummAtt ? `Cumulative Master Attendance Rate: <strong>${cummAtt}</strong>` : `Present: <strong>0</strong> | Late: <strong>0</strong> | Absent: <strong>0</strong> | Excused: <strong>0</strong>`);
+
+          // Group scores by subject_id to calculate individual subject average scores
+          const subjectScoresMap = {};
+          filteredScores.forEach(sc => {
+            const sId = sc.subject_id || "general";
+            if (!subjectScoresMap[sId]) {
+              const sName = subjNameMap.get(sId) || sc.subject_name || "General Subject";
+              subjectScoresMap[sId] = { name: sName, scores: [] };
+            }
+            const valid = extractValidScore(sc);
+            if (valid !== null && !isNaN(valid.percentage)) {
+              subjectScoresMap[sId].scores.push(valid.percentage);
+            }
+          });
+
+          const subjectAverageList = Object.keys(subjectScoresMap).map(sId => {
+            const item = subjectScoresMap[sId];
+            const avg = item.scores.length > 0 
+              ? (item.scores.reduce((a, b) => a + b, 0) / item.scores.length).toFixed(1) 
+              : "0.0";
+            return { id: sId, name: item.name, average: avg };
+          });
+
+          document.getElementById("profile-right-panel-content").innerHTML = `
+            <div style="display:flex; flex-direction:column; gap:0.5rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-secondary); padding:0.4rem 0.6rem; border-radius:6px; border:1px solid var(--border-color);">
+                <span style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase;">Academic Session:</span>
+                <select id="profile-acad-year-filter" class="form-control" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; width:160px;">
+                  <option value="CURRENT" ${selectedYear === "CURRENT" ? "selected" : ""}>Current (2026/2027) [In Focus]</option>
+                  <option value="2025/2026" ${selectedYear === "2025/2026" ? "selected" : ""}>2025/2026 (Past History)</option>
+                  <option value="ALL" ${selectedYear === "ALL" ? "selected" : ""}>All Recorded History</option>
+                </select>
               </div>
-              ${subjectAverageList.length > 0 ? `
-              <div style="width:100%; border-top:1px dashed var(--border-color); padding-top:0.4rem; margin-top:0.2rem;">
-                <div style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:0.35rem;">
-                  Individual Subject Average Scores:
+              <div class="profile-info-pill" style="flex-direction:column; align-items:flex-start; gap:0.4rem;">
+                <div style="display:flex; justify-content:space-between; width:100%; align-items:center;">
+                  <span class="pill-label">Grade Average (Overall):</span>
+                  <span class="pill-value" style="color:var(--accent-primary); font-size:1.05rem; font-weight:800;">${averagePct}</span>
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.35rem;">
-                  ${subjectAverageList.map(sa => `
-                    <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:0.3rem 0.5rem; display:flex; justify-content:space-between; align-items:center; font-size:0.78rem;">
-                      <span style="color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;" title="${sa.name}">${sa.name}</span>
-                      <strong style="color:var(--accent-primary);">${sa.average}%</strong>
-                    </div>
-                  `).join("")}
+                ${subjectAverageList.length > 0 ? `
+                <div style="width:100%; border-top:1px dashed var(--border-color); padding-top:0.4rem; margin-top:0.2rem;">
+                  <div style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:0.35rem;">
+                    Individual Subject Average Scores:
+                  </div>
+                  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.35rem;">
+                    ${subjectAverageList.map(sa => `
+                      <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:0.3rem 0.5rem; display:flex; justify-content:space-between; align-items:center; font-size:0.78rem;">
+                        <span style="color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;" title="${sa.name}">${sa.name}</span>
+                        <strong style="color:var(--accent-primary);">${sa.average}%</strong>
+                      </div>
+                    `).join("")}
+                  </div>
                 </div>
+                ` : ''}
               </div>
-              ` : ''}
+              <div class="profile-info-pill">
+                <span class="pill-label">Attendance Record:</span>
+                <span class="pill-value" style="color:var(--accent-success); font-weight:700;">${displayAttRecord}</span>
+              </div>
+              <div class="profile-info-pill" style="flex-direction:column; align-items:flex-start; gap:0.35rem;">
+                <span class="pill-label">Attendance Breakdown:</span>
+                <span class="pill-value" style="text-align:left; font-size:0.8rem; font-weight:normal;">
+                  ${displayAttBreakdown}
+                </span>
+              </div>
+              <div class="card" style="margin:0; background:var(--bg-primary); padding:0.6rem 0.75rem; border-radius:8px; border:1px solid var(--border-color); font-size:0.8rem; max-height:110px; overflow-y:auto;">
+                <strong style="color:var(--text-secondary);">Recent Subject Scores:</strong><br>
+                ${filteredScores.length > 0 ? filteredScores.map(s => {
+                  const v = extractValidScore(s);
+                  const fractionStr = v ? `${v.obtained} / ${v.max}` : (s.total_score !== undefined ? `${s.total_score} / 100` : "N/A");
+                  const pctStr = v ? `${v.percentage.toFixed(0)}%` : "N/A";
+                  return `• ${s.assessment_name || "Continuous Assessment"}: <strong>${fractionStr}</strong> (${pctStr})`;
+                }).join("<br>") : (cummAcad ? `• Official Baseline Score: <strong>${cummAcad}</strong> (Master Registry record)` : "No continuous scores recorded yet.")}
+              </div>
             </div>
-            <div class="profile-info-pill">
-              <span class="pill-label">Attendance Record:</span>
-              <span class="pill-value" style="color:var(--accent-success); font-weight:700;">${displayAttRecord}</span>
-            </div>
-            <div class="profile-info-pill" style="flex-direction:column; align-items:flex-start; gap:0.35rem;">
-              <span class="pill-label">Attendance Breakdown:</span>
-              <span class="pill-value" style="text-align:left; font-size:0.8rem; font-weight:normal;">
-                ${displayAttBreakdown}
-              </span>
-            </div>
-            <div class="card" style="margin:0; background:var(--bg-primary); padding:0.6rem 0.75rem; border-radius:8px; border:1px solid var(--border-color); font-size:0.8rem; max-height:110px; overflow-y:auto;">
-              <strong style="color:var(--text-secondary);">Recent Subject Scores:</strong><br>
-              ${studScores.length > 0 ? studScores.map(s => `• ${s.assessment_name || "Test"}: <strong>${s.score_obtained}/&nbsp;${s.max_score}</strong> (${((s.score_obtained/s.max_score)*100).toFixed(0)}%)`).join("<br>") : (cummAcad ? `• Official Baseline Score: <strong>${cummAcad}</strong> (Master Registry record)` : "No continuous scores recorded yet.")}
-            </div>
-          </div>
-        `;
+          `;
+
+          const yearSel = document.getElementById("profile-acad-year-filter");
+          if (yearSel) {
+            yearSel.addEventListener("change", () => {
+              renderStudentAcademicPanel(yearSel.value);
+            });
+          }
+        };
+
+        renderStudentAcademicPanel("CURRENT");
       } else {
         document.getElementById("profile-right-panel-title").innerText = "Payroll Compensation & Deductions";
         if (document.getElementById("btn-pm-tab-context")) {
@@ -15751,8 +16047,45 @@ async function renderRecordsManagement(container) {
           <td style="color:${t.amount < 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">
             <strong>GH¢ ${Math.abs(t.amount).toFixed(2)}</strong>
           </td>
+          <td>
+            <button class="btn btn-secondary btn-del-profile-tx" data-id="${t.transaction_id}" data-ref="${t.reference_no}" data-amount="${t.amount}" data-type="${t.type}" style="min-height:24px; padding:0 0.4rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this entry">🗑️ Delete</button>
+          </td>
         </tr>
-      `).join("") || `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
+      `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
+
+      // Delete entry hook inside profile modal
+      document.getElementById("profile-financial-rows").querySelectorAll(".btn-del-profile-tx").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const txId = btn.getAttribute("data-id");
+          const ref = btn.getAttribute("data-ref") || "N/A";
+          const amt = parseFloat(btn.getAttribute("data-amount"));
+          const type = btn.getAttribute("data-type") || "ENTRY";
+          const confirmed = confirm(`Delete transaction entry permanently?\n\n• Reference: ${ref}\n• Type: ${type}\n• Amount: GH¢ ${Math.abs(amt).toFixed(2)}\n\nThis will remove the entry and update this student's ledger balances.`);
+          if (!confirmed) return;
+          try {
+            btn.disabled = true; btn.textContent = "...";
+            await window.db.delete("financial_transactions", txId);
+            showToast(`Entry (${ref}) deleted successfully.`, "success");
+            const freshTxs = await window.db.getAll("financial_transactions") || [];
+            const freshRel = freshTxs.filter(t => t.student_id === userId || (t.type === "PAYROLL" && t.student_id === null && t.reference_no && t.reference_no.includes(u.uid)));
+            document.getElementById("profile-financial-rows").innerHTML = freshRel.map(t => `
+              <tr>
+                <td>${new Date(t.timestamp).toLocaleDateString()}</td>
+                <td>${t.reference_no}</td>
+                <td>${t.billing_description || 'Payroll slip allocation'}</td>
+                <td><span class="badge badge-info">${t.type}</span></td>
+                <td>${t.payment_method}</td>
+                <td style="color:${t.amount < 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}"><strong>GH¢ ${Math.abs(t.amount).toFixed(2)}</strong></td>
+                <td><button class="btn btn-secondary btn-del-profile-tx" data-id="${t.transaction_id}" data-ref="${t.reference_no}" data-amount="${t.amount}" data-type="${t.type}" style="min-height:24px; padding:0 0.4rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this entry">🗑️ Delete</button></td>
+              </tr>
+            `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
+            if (typeof window._refreshFeeLedger === "function") window._refreshFeeLedger();
+          } catch (err) {
+            showToast("Failed to delete entry: " + err.message, "danger");
+            btn.disabled = false; btn.textContent = "🗑️ Delete";
+          }
+        });
+      });
 
       // Mobile subtab switching logic
       const pTabBtns = document.querySelectorAll(".profile-modal-tab-btn");
@@ -18369,12 +18702,9 @@ async function renderRecordsDashboard(container) {
       attPeriodLabel = "Today";
     } else {
       const profiles = await window.db.getAll("profiles") || [];
-      const validAtts = profiles.map(p => {
-        const a = p.cummulative_attendance;
-        if (!a) return null;
-        const num = parseFloat(String(a).replace("%", ""));
-        return isNaN(num) ? null : num;
-      }).filter(n => n !== null);
+      const validAtts = profiles
+        .map(p => parseValidPercentage(p.cummulative_attendance))
+        .filter(n => n !== null && !isNaN(n));
       if (validAtts.length > 0) {
         dailyRate = (validAtts.reduce((a, b) => a + b, 0) / validAtts.length).toFixed(1);
       }
@@ -18922,8 +19252,9 @@ function renderList() {
         const cStuds = validEnrolments.filter(e => cIds.includes(e.class_id)).map(e => e.student_id);
         if (cStuds.length === 0) return -1;
         const cScores = scores.filter(s => cStuds.includes(s.student_id));
-        if (cScores.length === 0) return -1;
-        return cScores.reduce((sum, s) => sum + (s.score_obtained / s.max_score), 0) / cScores.length;
+        const valid = cScores.map(s => extractValidScore(s)).filter(v => v !== null && !isNaN(v.percentage));
+        if (valid.length === 0) return -1;
+        return (valid.reduce((sum, v) => sum + v.percentage, 0) / valid.length) / 100;
       };
       return calcAvg(b) - calcAvg(a);
     }
@@ -18954,9 +19285,10 @@ function renderList() {
       const classStuds = validEnrolments.filter(e => classIds.includes(e.class_id)).map(e => e.student_id);
       if (classStuds.length > 0) {
         const classScores = scores.filter(s => classStuds.includes(s.student_id));
-        if (classScores.length > 0) {
-          const avg = classScores.reduce((sum, s) => sum + (s.score_obtained / s.max_score), 0) / classScores.length;
-          classAvgStr = `${(avg * 100).toFixed(1)}%`;
+        const valid = classScores.map(s => extractValidScore(s)).filter(v => v !== null && !isNaN(v.percentage));
+        if (valid.length > 0) {
+          const avg = valid.reduce((sum, v) => sum + v.percentage, 0) / valid.length;
+          classAvgStr = `${avg.toFixed(1)}%`;
         }
       }
     }
@@ -19280,19 +19612,30 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
             btnSaveStaffAtt.innerText = "Saving Attendance...";
 
             try {
+              const activeYear = window.api && window.api.getAcademicYearForDate ? window.api.getAcademicYearForDate(dateStr) : "2026/2027";
+              const records = [];
               for (const select of selects) {
                 const userId = select.getAttribute("data-user-id");
                 const status = select.value;
 
                 const attId = `att-staff-${userId}-${dateStr}`;
-                const record = {
+                records.push({
                   attendance_id: attId,
                   user_id: userId,
                   marked_by: currentUser.user_id,
                   date: dateStr,
-                  status: status
-                };
-                await window.db.put("attendance", record);
+                  status: status,
+                  academic_year: activeYear,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+              }
+              if (window.db.putBatch) {
+                await window.db.putBatch("attendance", records);
+              } else {
+                for (const r of records) {
+                  await window.db.put("attendance", r);
+                }
               }
               showToast("Staff attendance records saved successfully!", "success");
             } catch (err) {
@@ -20069,11 +20412,214 @@ async function initDailyBirthdayAutoScheduler() {
 // ==========================================
 // 9. APP INITIALIZATION & ROUTING
 // ==========================================
+// ==========================================
+// UNIVERSAL DESKTOP HORIZONTAL TABLE SCROLL NAV BUTTONS
+// ==========================================
+function initTableScrollEnhancements() {
+  const tableContainers = document.querySelectorAll(".table-container");
+
+  tableContainers.forEach((container) => {
+    let wrapper = container.parentElement;
+    if (!wrapper || !wrapper.classList.contains("table-scroll-wrapper")) {
+      wrapper = document.createElement("div");
+      wrapper.className = "table-scroll-wrapper";
+      container.parentNode.insertBefore(wrapper, container);
+      wrapper.appendChild(container);
+
+      // Create Slim Left Scroll Button
+      const btnLeft = document.createElement("button");
+      btnLeft.type = "button";
+      btnLeft.className = "table-scroll-nav-btn table-scroll-nav-left";
+      btnLeft.setAttribute("aria-label", "Scroll table left");
+      btnLeft.setAttribute("title", "Scroll left (click or hold)");
+      btnLeft.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      `;
+
+      // Create Slim Right Scroll Button
+      const btnRight = document.createElement("button");
+      btnRight.type = "button";
+      btnRight.className = "table-scroll-nav-btn table-scroll-nav-right";
+      btnRight.setAttribute("aria-label", "Scroll table right");
+      btnRight.setAttribute("title", "Scroll right (click or hold)");
+      btnRight.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      `;
+
+      wrapper.appendChild(btnLeft);
+      wrapper.appendChild(btnRight);
+
+      // Press and hold continuous scroll or click smooth scroll
+      const attachScrollHandlers = (btn, direction) => {
+        let holdTimer = null;
+        let animId = null;
+        let startTime = 0;
+        let isHolding = false;
+
+        const stop = () => {
+          if (holdTimer) {
+            clearTimeout(holdTimer);
+            holdTimer = null;
+          }
+          if (animId) {
+            cancelAnimationFrame(animId);
+            animId = null;
+          }
+          window.removeEventListener("mouseup", stop);
+          window.removeEventListener("touchend", stop);
+          window.removeEventListener("touchcancel", stop);
+        };
+
+        const start = (e) => {
+          if (e.button !== undefined && e.button !== 0) return; // Only primary mouse button
+          isHolding = false;
+          startTime = Date.now();
+
+          // Wait 200ms before initiating continuous smooth scrolling
+          holdTimer = setTimeout(() => {
+            isHolding = true;
+            let step = 10;
+            const continuousScroll = () => {
+              container.scrollLeft += direction * step;
+              step = Math.min(step + 0.5, 26);
+              animId = requestAnimationFrame(continuousScroll);
+            };
+            animId = requestAnimationFrame(continuousScroll);
+          }, 200);
+
+          window.addEventListener("mouseup", stop);
+          window.addEventListener("touchend", stop);
+          window.addEventListener("touchcancel", stop);
+        };
+
+        btn.addEventListener("mousedown", start);
+        btn.addEventListener("touchstart", start, { passive: true });
+
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // If release was quick, perform smooth horizontal scroll step
+          if (!isHolding && (Date.now() - startTime) < 220) {
+            const scrollDistance = Math.max(260, Math.floor(container.clientWidth * 0.5));
+            container.scrollBy({ left: direction * scrollDistance, behavior: "smooth" });
+          }
+        });
+      };
+
+      attachScrollHandlers(btnLeft, -1);
+      attachScrollHandlers(btnRight, 1);
+
+      // Dynamic button state and vertical viewport centering updater
+      const updateButtons = () => {
+        const maxScroll = container.scrollWidth - container.clientWidth;
+        const hasOverflow = maxScroll > 4;
+
+        if (!hasOverflow) {
+          btnLeft.classList.remove("is-visible");
+          btnRight.classList.remove("is-visible");
+          return;
+        }
+
+        if (container.scrollLeft > 4) {
+          btnLeft.classList.add("is-visible");
+        } else {
+          btnLeft.classList.remove("is-visible");
+        }
+
+        if (container.scrollLeft < maxScroll - 4) {
+          btnRight.classList.add("is-visible");
+        } else {
+          btnRight.classList.remove("is-visible");
+        }
+
+        // Keep buttons centered vertically in user's viewport within the table height
+        const rect = container.getBoundingClientRect();
+        const headerHeight = 65;
+        const visibleTop = Math.max(rect.top, headerHeight);
+        const visibleBottom = Math.min(rect.bottom, window.innerHeight);
+
+        if (visibleBottom > visibleTop) {
+          const centerScreenY = (visibleTop + visibleBottom) / 2;
+          const offsetInContainer = centerScreenY - rect.top;
+          const btnHalfH = 34;
+          const clampedY = Math.max(btnHalfH + 6, Math.min(rect.height - btnHalfH - 6, offsetInContainer));
+          btnLeft.style.top = `${clampedY}px`;
+          btnRight.style.top = `${clampedY}px`;
+        }
+      };
+
+      container._updateTableScrollNav = updateButtons;
+      container.addEventListener("scroll", updateButtons, { passive: true });
+
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => updateButtons());
+        ro.observe(container);
+        if (container.firstElementChild) {
+          ro.observe(container.firstElementChild);
+        }
+      }
+
+      updateButtons();
+      setTimeout(updateButtons, 150);
+      setTimeout(updateButtons, 600);
+    } else {
+      if (typeof container._updateTableScrollNav === "function") {
+        container._updateTableScrollNav();
+      }
+    }
+  });
+}
+
+window.initTableScrollEnhancements = initTableScrollEnhancements;
+
+let tableScrollTicking = false;
+function updateAllTableScrollNavs() {
+  const containers = document.querySelectorAll(".table-container");
+  containers.forEach(c => {
+    if (typeof c._updateTableScrollNav === "function") {
+      c._updateTableScrollNav();
+    }
+  });
+}
+
+window.addEventListener("scroll", () => {
+  if (!tableScrollTicking) {
+    requestAnimationFrame(() => {
+      updateAllTableScrollNavs();
+      tableScrollTicking = false;
+    });
+    tableScrollTicking = true;
+  }
+}, { passive: true });
+
+window.addEventListener("resize", () => {
+  if (!tableScrollTicking) {
+    requestAnimationFrame(() => {
+      updateAllTableScrollNavs();
+      tableScrollTicking = false;
+    });
+    tableScrollTicking = true;
+  }
+}, { passive: true });
+
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   await initAcademicCalendarCache();
   await initDailyBirthdayAutoScheduler();
   
+  initTableScrollEnhancements();
+
+  // Automatic observer for dynamically rendered subviews, tabs, and tables
+  const tableMutationObserver = new MutationObserver(() => {
+    initTableScrollEnhancements();
+  });
+  const subviewRoot = document.getElementById("dashboard-subview-container") || document.body;
+  tableMutationObserver.observe(subviewRoot, { childList: true, subtree: true });
+
   document.getElementById("btn-theme-toggle-portal").addEventListener("click", toggleTheme);
 
   document.getElementById("btn-back-to-site").addEventListener("click", () => {

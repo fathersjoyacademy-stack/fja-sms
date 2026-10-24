@@ -85,6 +85,65 @@ async function checkCleanSlateEpoch() {
 }
 
 // Initializer function
+// Student Fee Entries Clean Slate Epoch (Option A: Purge fee invoices, payments & balances)
+const FEE_CLEAN_SLATE_KEY = "fja_fee_clean_slate_epoch_2026_10_23";
+const FEE_CLEAN_SLATE_TIMESTAMP = "2026-10-23T20:50:00.000Z";
+
+function isStudentFeeTransaction(tx) {
+  if (!tx) return false;
+  if (tx.type === "PAYROLL" || tx.type === "OTHER_INCOME" || tx.type === "OTHER_EXPENSE" || tx.type === "RECEIVABLE" || tx.type === "PAYABLE") {
+    if (!tx.student_id) return false;
+  }
+  if (tx.student_id) return true;
+  if (tx.type === "FEE_PAYMENT" || tx.type === "PAYMENT" || tx.type === "INVOICE" || tx.type === "TUITION" || tx.type === "REVERSAL" || tx.type === "BAD_DEBT") {
+    return true;
+  }
+  const txId = String(tx.transaction_id || "");
+  const ref = String(tx.reference_no || "");
+  if (txId.startsWith("t-invoice-") || ref.includes("School Fees") || ref.startsWith("GB-") || ref.startsWith("REV-") || ref.startsWith("BD-")) {
+    return true;
+  }
+  return false;
+}
+
+async function purgeStudentFeeEntriesCleanSlate(force = false) {
+  if (typeof localStorage === "undefined") return 0;
+  if (!force && localStorage.getItem(FEE_CLEAN_SLATE_KEY) === "completed") return 0;
+
+  try {
+    const allTxs = await db.getAll("financial_transactions");
+    let count = 0;
+    if (allTxs && allTxs.length > 0) {
+      for (const tx of allTxs) {
+        if (isStudentFeeTransaction(tx)) {
+          const txTime = tx.created_at || tx.timestamp || "1970-01-01";
+          if (force || new Date(txTime).getTime() <= new Date(FEE_CLEAN_SLATE_TIMESTAMP).getTime()) {
+            await db.deleteLocal("financial_transactions", tx.transaction_id);
+            count++;
+            if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+              try {
+                firebase.firestore().collection("financial_transactions").doc(tx.transaction_id).delete().catch(() => {});
+              } catch (e) {}
+            }
+          }
+        }
+      }
+    }
+    localStorage.setItem(FEE_CLEAN_SLATE_KEY, "completed");
+    console.log(`Student fee entries clean slate: purged ${count} records from local database.`);
+    if (count > 0 && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "financial_transactions" } }));
+      if (typeof window._refreshFeeLedger === "function") {
+        window._refreshFeeLedger();
+      }
+    }
+    return count;
+  } catch (err) {
+    console.warn("purgeStudentFeeEntriesCleanSlate notice:", err);
+    return 0;
+  }
+}
+
 async function initDB() {
   if (dbInstance) {
     return dbInstance;
@@ -448,6 +507,24 @@ async function assembleFirestoreDoc(storeName, docData) {
   return docData;
 }
 
+function isDocContentIdentical(a, b) {
+  if (!a || !b) return false;
+  const ignoreKeys = new Set(["updated_at", "created_at", "synced", "is_seed", "_preserve_updated_at"]);
+  const keysA = Object.keys(a).filter(k => !ignoreKeys.has(k));
+  const keysB = Object.keys(b).filter(k => !ignoreKeys.has(k));
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    const valA = a[k];
+    const valB = b[k];
+    if (typeof valA === "object" || typeof valB === "object") {
+      if (JSON.stringify(valA) !== JSON.stringify(valB)) return false;
+    } else if (valA !== valB) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Database Helper Actions
 const db = {
   // Get doc identifier key name
@@ -622,20 +699,26 @@ const db = {
     if (!obj.created_at) {
       obj.created_at = obj.updated_at;
     }
+
+    const docId = this.getDocId(storeName, obj);
+    let shouldWriteCloud = cloudWritable && isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured();
+    if (shouldWriteCloud && docId) {
+      const existing = await this.get(storeName, docId);
+      if (existing && isDocContentIdentical(existing, obj)) {
+        shouldWriteCloud = false; // Deduplicate: unchanged data avoids burning Firestore write quota
+      }
+    }
     
     const res = await this.putLocal(storeName, obj);
-    if (cloudWritable && isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+    if (shouldWriteCloud && docId) {
       try {
-        const docId = this.getDocId(storeName, obj);
-        if (docId) {
-          if (typeof ensureFirebaseAuth === "function") {
-            await ensureFirebaseAuth();
-          }
-          if (storeName === "cms_content" && docId === "gallery_images" && typeof syncGalleryImagesToFirestore === "function") {
-            await syncGalleryImagesToFirestore(obj);
-          } else {
-            await firebase.firestore().collection(storeName).doc(docId).set(obj, { merge: true });
-          }
+        if (typeof ensureFirebaseAuth === "function") {
+          await ensureFirebaseAuth();
+        }
+        if (storeName === "cms_content" && docId === "gallery_images" && typeof syncGalleryImagesToFirestore === "function") {
+          await syncGalleryImagesToFirestore(obj);
+        } else {
+          await firebase.firestore().collection(storeName).doc(docId).set(obj, { merge: true });
         }
       } catch (err) {
         console.warn("Firestore save failed (offline queue active):", err);
@@ -644,6 +727,73 @@ const db = {
       }
     }
     return res;
+  },
+
+  // Batch Save/Update records globally (IndexedDB + Cloud Firestore writeBatch)
+  async putBatch(storeName, items) {
+    if (!Array.isArray(items) || items.length === 0) return true;
+    const isOnline = navigator.onLine;
+    const cloudWritable = canWriteToCloud(storeName);
+    const nowIso = new Date().toISOString();
+
+    for (const obj of items) {
+      obj.synced = cloudWritable ? isOnline : true;
+      delete obj.is_seed;
+      if (!obj._preserve_updated_at) {
+        obj.updated_at = nowIso;
+      } else {
+        delete obj._preserve_updated_at;
+      }
+      if (!obj.created_at) {
+        obj.created_at = obj.updated_at;
+      }
+    }
+
+    // 1. Batch write into IndexedDB in a single transaction
+    const dbInst = await initDB();
+    await new Promise((resolve, reject) => {
+      const transaction = dbInst.transaction(storeName, "readwrite");
+      const store = transaction.objectStore(storeName);
+      items.forEach(item => store.put(item));
+      transaction.oncomplete = () => resolve(true);
+      transaction.onerror = () => reject(transaction.error);
+    });
+
+    // 2. Commit to Firestore in batches (max 450 per commit to stay well within limits)
+    if (cloudWritable && isOnline && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+      try {
+        if (typeof ensureFirebaseAuth === "function") {
+          await ensureFirebaseAuth();
+        }
+        const firestore = firebase.firestore();
+        const BATCH_LIMIT = 450;
+        for (let i = 0; i < items.length; i += BATCH_LIMIT) {
+          const chunk = items.slice(i, i + BATCH_LIMIT);
+          const batch = firestore.batch();
+          for (const item of chunk) {
+            const docId = this.getDocId(storeName, item);
+            if (docId) {
+              const docRef = firestore.collection(storeName).doc(docId);
+              batch.set(docRef, item, { merge: true });
+            }
+          }
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn(`Firestore putBatch failed for ${storeName} (queued locally):`, err);
+        for (const item of items) {
+          item.synced = false;
+        }
+        const tx = dbInst.transaction(storeName, "readwrite");
+        const store = tx.objectStore(storeName);
+        items.forEach(item => store.put(item));
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName, batchCount: items.length } }));
+    }
+    return true;
   },
 
   // Add record (fails if key exists)
@@ -1740,6 +1890,7 @@ function shouldKeepLocalDoc(storeName, docId, localDoc, remoteDoc) {
 // Sanitize incoming Firestore documents to scrub legacy sample announcements and events
 function sanitizeIncomingDoc(storeName, docId, docData) {
   if (!docData) return docData;
+
   if (storeName === "enrolments") {
     if (docId === "e-enrol-1790887884074" || docData.student_id === "u-d3qlgoe3h") {
       return null;
@@ -1828,6 +1979,124 @@ function clearAllFirestoreListeners() {
   }
 }
 
+// Role-based store pruning to avoid syncing unneeded collections on free tier
+function getStoresForUserRole(role) {
+  if (!role) {
+    return ["cms_content", "academic_calendar", "gallery_albums", "gallery_images"];
+  }
+  if (role === "Student") {
+    return [
+      "users", "profiles", "classes", "assignments", "student_scores",
+      "attendance", "notifications", "portal_messages", "notification_user_reads",
+      "cms_content", "academic_calendar", "elibrary_books"
+    ];
+  }
+  if (role === "Parent") {
+    return [
+      "users", "profiles", "parent_profiles", "parent_student_relations",
+      "classes", "student_scores", "attendance", "financial_transactions",
+      "notifications", "portal_messages", "notification_user_reads",
+      "cms_content", "academic_calendar"
+    ];
+  }
+  if (role === "Teacher" || role === "SectionalHead") {
+    return [
+      "users", "profiles", "classes", "enrolments", "class_posts",
+      "assignments", "student_scores", "attendance", "lesson_notes",
+      "staff_tasks", "broadcast_requests", "notifications", "portal_messages",
+      "notification_user_reads", "subjects", "cms_content", "academic_calendar"
+    ];
+  }
+  if (role === "Finance") {
+    return [
+      "users", "profiles", "classes", "enrolments", "financial_transactions",
+      "bank_reconciliations", "notifications", "portal_messages",
+      "notification_user_reads", "cms_content", "academic_calendar"
+    ];
+  }
+  // Proprietor, HeadTeacher, Admin get full scope
+  return STORES_TO_SYNC;
+}
+
+// Self-healing database sanitizer: heals score records missing score_obtained/max_score, and fixes NaN profile averages
+async function healDatabaseScoresAndProfiles() {
+  try {
+    const scores = await db.getAll("student_scores");
+    if (scores && scores.length > 0) {
+      let repairedCount = 0;
+      for (const sc of scores) {
+        let changed = false;
+        const totalNum = parseFloat(sc.total_score);
+        const scoreObtainedNum = parseFloat(sc.score_obtained);
+        const maxScoreNum = parseFloat(sc.max_score);
+
+        if (isNaN(scoreObtainedNum) || sc.score_obtained === undefined || sc.score_obtained === null) {
+          if (!isNaN(totalNum)) {
+            sc.score_obtained = totalNum;
+            changed = true;
+          } else if (sc.class_score !== undefined || sc.exam_score !== undefined) {
+            const cls = parseFloat(sc.class_score || sc.ca_score || 0) || 0;
+            const exm = parseFloat(sc.exam_score || 0) || 0;
+            sc.score_obtained = cls + exm;
+            sc.total_score = sc.score_obtained;
+            changed = true;
+          }
+        }
+        if (isNaN(maxScoreNum) || !sc.max_score || maxScoreNum <= 0) {
+          sc.max_score = 100;
+          changed = true;
+        }
+        if (!sc.created_at) {
+          sc.created_at = sc.updated_at || new Date().toISOString();
+          changed = true;
+        }
+        if (changed) {
+          await db.putLocal("student_scores", sc);
+          repairedCount++;
+        }
+      }
+      if (repairedCount > 0) {
+        console.log(`Database self-healing: repaired ${repairedCount} student score records.`);
+      }
+    }
+
+    // Clean up profiles with "NaN" or "NaN%"
+    const profiles = await db.getAll("profiles");
+    if (profiles && profiles.length > 0) {
+      for (const p of profiles) {
+        let profChanged = false;
+        if (p.cummulative_academic_score && String(p.cummulative_academic_score).includes("NaN")) {
+          const myScores = (scores || []).filter(s => s.student_id === p.user_id);
+          const validPcts = myScores.map(s => {
+            const val = parseFloat(s.score_obtained);
+            const mx = parseFloat(s.max_score) || 100;
+            return (!isNaN(val) && mx > 0) ? (val / mx) * 100 : null;
+          }).filter(x => x !== null && !isNaN(x));
+
+          if (validPcts.length > 0) {
+            const avg = validPcts.reduce((a, b) => a + b, 0) / validPcts.length;
+            p.cummulative_academic_score = `${avg.toFixed(1)}%`;
+          } else {
+            p.cummulative_academic_score = null;
+          }
+          profChanged = true;
+        }
+
+        if (p.cummulative_attendance && String(p.cummulative_attendance).includes("NaN")) {
+          p.cummulative_attendance = null;
+          profChanged = true;
+        }
+
+        if (profChanged) {
+          await db.putLocal("profiles", p);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Database self-healing notice:", e);
+  }
+}
+
 async function startFirestoreSync(specificStores = null) {
   if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) {
     console.log("Firebase not configured - running in local-only Mode.");
@@ -1842,7 +2111,38 @@ async function startFirestoreSync(specificStores = null) {
     await ensureFirebaseAuth();
     const firestore = firebase.firestore();
 
-    const storesToProcess = specificStores || STORES_TO_SYNC;
+    // Trigger score and profile self-healing asynchronously
+    healDatabaseScoresAndProfiles().catch(() => {});
+
+    // Role-based store pruning to prevent exhausting free-tier read limits
+    const currentRole = (window.currentUser && window.currentUser.role) || (typeof currentUser !== "undefined" && currentUser ? currentUser.role : null);
+    const roleAllowed = getStoresForUserRole(currentRole);
+    const storesToFilter = specificStores || STORES_TO_SYNC;
+    const storesToProcess = storesToFilter.filter(s => roleAllowed.includes(s));
+
+    const REALTIME_STORES = [
+      "portal_messages",
+      "notifications",
+      "notification_user_reads",
+      "broadcast_requests",
+      "cms_content",
+      "academic_calendar",
+      "financial_transactions",
+      "attendance",
+      "student_scores",
+      "users",
+      "profiles",
+      "classes",
+      "enrolments",
+      "class_posts",
+      "staff_tasks",
+      "lesson_notes",
+      "assignments",
+      "data_change_requests",
+      "parent_profiles",
+      "parent_student_relations"
+    ];
+
     storesToProcess.forEach(storeName => {
       if (DB_READ_ONLY) {
         const PUBLIC_STORES = ["cms_content", "academic_calendar", "gallery_albums", "gallery_images"];
@@ -1863,6 +2163,7 @@ async function startFirestoreSync(specificStores = null) {
 
       const lastSyncKey = `fja_last_sync_${storeName}`;
       const lastSync = localStorage.getItem(lastSyncKey);
+      const isRealtime = REALTIME_STORES.includes(storeName);
 
       const ingestBatch = async (snapshot) => {
         if (!snapshot.empty) {
@@ -1913,146 +2214,98 @@ async function startFirestoreSync(specificStores = null) {
         }
       };
 
-      // 1. Initial Cloud State Pull: Delta Query if lastSync exists, otherwise full pull & bootstrap
-      let initialQuery = firestore.collection(storeName);
-
-      // --- RBAC FILTERING INJECTION ---
-      if (window.currentUser) {
-        const role = window.currentUser.role;
-        const myId = window.currentUser.user_id;
-        
-        if (role === "Student") {
-          if (["student_scores", "financial_transactions", "enrolments"].includes(storeName)) {
-            initialQuery = initialQuery.where("student_id", "==", myId);
-          } else if (storeName === "attendance") {
-            initialQuery = initialQuery.where("user_id", "==", myId);
-          } else if (["users", "profiles"].includes(storeName)) {
-            initialQuery = initialQuery.where("user_id", "==", myId);
-          } else if (["audit_logs", "staff_tasks", "bank_reconciliations", "data_change_requests", "pickup_guardians", "lesson_notes", "broadcast_requests"].includes(storeName)) {
-            return;
+      // 1. Static Store Delta Sync: Only fetch static/non-realtime collections if not polled within 5 minutes
+      if (!isRealtime) {
+        const fiveMinutesMs = 5 * 60 * 1000;
+        const lastSyncAge = lastSync ? (Date.now() - new Date(lastSync).getTime()) : Infinity;
+        if (lastSyncAge > fiveMinutesMs) {
+          let staticQuery = firestore.collection(storeName);
+          if (lastSync && storeName !== "academic_calendar") {
+            const safetyBufferMs = 15 * 60 * 1000;
+            const lastSyncMs = new Date(lastSync).getTime();
+            const bufferedSyncTime = (!isNaN(lastSyncMs) && lastSyncMs > safetyBufferMs)
+              ? new Date(lastSyncMs - safetyBufferMs).toISOString()
+              : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            staticQuery = staticQuery.where("updated_at", ">", bufferedSyncTime);
+          } else if (!lastSync) {
+            staticQuery = staticQuery.limit(100);
           }
+          staticQuery.get().then(ingestBatch).catch(err => {
+            console.warn(`Static sync fetch for ${storeName} skipped:`, err);
+          });
         }
       }
-      // --------------------------------
-
-      // 5-minute safety buffer for clock skew and network latency
-      if (lastSync && storeName !== "academic_calendar") {
-        const safetyBufferMs = 5 * 60 * 1000;
-        const lastSyncMs = new Date(lastSync).getTime();
-        const bufferedSyncTime = (!isNaN(lastSyncMs) && lastSyncMs > safetyBufferMs)
-          ? new Date(lastSyncMs - safetyBufferMs).toISOString()
-          : lastSync;
-        initialQuery = initialQuery.where("updated_at", ">", bufferedSyncTime);
-      }
-
-      initialQuery.get().then(async snapshot => {
-        if (!lastSync && snapshot.empty) {
-          // Cloud empty on first setup: bootstrap seed data
-          try {
-            const localRecords = await db.getAll(storeName);
-            if (localRecords && localRecords.length > 0) {
-              for (const rec of localRecords) {
-                const docId = db.getDocId(storeName, rec);
-                if (docId) {
-                  if (!rec.updated_at) rec.updated_at = new Date().toISOString();
-                  if (canWriteToCloud(storeName)) {
-                    if (storeName === "cms_content" && docId === "gallery_images") {
-                      await syncGalleryImagesToFirestore(rec);
-                    } else {
-                      await firestore.collection(storeName).doc(docId).set(rec);
-                    }
-                  }
-                }
-              }
-            }
-          } catch (seedPushErr) {
-            console.warn(`Auto-populating cloud collection ${storeName} skipped:`, seedPushErr);
-          }
-          localStorage.setItem(lastSyncKey, new Date().toISOString());
-        } else {
-          await ingestBatch(snapshot);
-        }
-      }).catch(err => {
-        console.warn(`Delta Firestore pull for ${storeName} fell back to full fetch:`, err);
-        firestore.collection(storeName).get().then(ingestBatch).catch(e => console.warn(`Full pull fallback for ${storeName} skipped:`, e));
-      });
 
       // 2. Real-time multi-device listener across all core operational stores
-      const REALTIME_STORES = [
-        "portal_messages",
-        "notifications",
-        "notification_user_reads",
-        "broadcast_requests",
-        "cms_content",
-        "academic_calendar",
-        "financial_transactions",
-        "attendance",
-        "student_scores",
-        "users",
-        "profiles",
-        "classes",
-        "enrolments",
-        "class_posts",
-        "staff_tasks",
-        "lesson_notes",
-        "assignments",
-        "data_change_requests",
-        "parent_profiles",
-        "parent_student_relations"
-      ];
-
-      if (REALTIME_STORES.includes(storeName)) {
-        let queries = [];
+      // NOTE: We DO NOT run initialQuery.get() beforehand because onSnapshot already delivers initial documents!
+      if (isRealtime) {
+        let baseQueries = [];
         if (window.currentUser) {
           const role = window.currentUser.role;
           const myId = window.currentUser.user_id;
           
           if (role === "Student") {
             if (["student_scores", "financial_transactions", "enrolments"].includes(storeName)) {
-              queries.push(firestore.collection(storeName).where("student_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("student_id", "==", myId));
             } else if (storeName === "attendance") {
-              queries.push(firestore.collection(storeName).where("user_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("user_id", "==", myId));
             } else if (storeName === "users" || storeName === "profiles") {
-              queries.push(firestore.collection(storeName).where("user_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("user_id", "==", myId));
             } else if (storeName === "portal_messages") {
-              queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
-              queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("sender_id", "==", myId));
             } else if (storeName === "notifications") {
-              queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
-              queries.push(firestore.collection(storeName).where("role", "==", role));
-              queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+              baseQueries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("role", "==", role));
+              baseQueries.push(firestore.collection(storeName).where("role", "==", "ALL"));
             } else if (["classes", "assignments", "class_posts", "cms_content", "academic_calendar"].includes(storeName)) {
-              queries.push(firestore.collection(storeName));
+              baseQueries.push(firestore.collection(storeName));
             }
           } else if (role === "Parent") {
             if (storeName === "portal_messages") {
-              queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
-              queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("sender_id", "==", myId));
             } else if (storeName === "notifications") {
-              queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
-              queries.push(firestore.collection(storeName).where("role", "==", role));
-              queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+              baseQueries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("role", "==", role));
+              baseQueries.push(firestore.collection(storeName).where("role", "==", "ALL"));
             } else {
-              queries.push(firestore.collection(storeName));
+              baseQueries.push(firestore.collection(storeName));
             }
           } else {
             // Staff, Teacher, SectionalHead, Finance, Admin, HeadTeacher, Proprietor
             if (storeName === "portal_messages") {
-              queries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
-              queries.push(firestore.collection(storeName).where("sender_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("recipient_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("sender_id", "==", myId));
             } else if (storeName === "notifications") {
-              queries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
-              queries.push(firestore.collection(storeName).where("role", "==", role));
-              queries.push(firestore.collection(storeName).where("role", "==", "ALL"));
+              baseQueries.push(firestore.collection(storeName).where("target_user_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("role", "==", role));
+              baseQueries.push(firestore.collection(storeName).where("role", "==", "ALL"));
             } else if (storeName === "broadcast_requests" && (role === "Teacher" || role === "SectionalHead")) {
-              queries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
+              baseQueries.push(firestore.collection(storeName).where("teacher_id", "==", myId));
             } else {
-              queries.push(firestore.collection(storeName));
+              baseQueries.push(firestore.collection(storeName));
             }
           }
         } else {
-          queries.push(firestore.collection(storeName));
+          baseQueries.push(firestore.collection(storeName));
         }
+
+        // Apply Delta filter to onSnapshot queries to avoid reading the whole collection on connect
+        const queries = baseQueries.map(q => {
+          if (storeName === "academic_calendar") return q; // single doc
+          if (lastSync) {
+            const safetyBufferMs = 15 * 60 * 1000;
+            const lastSyncMs = new Date(lastSync).getTime();
+            const bufferedSyncTime = (!isNaN(lastSyncMs) && lastSyncMs > safetyBufferMs)
+              ? new Date(lastSyncMs - safetyBufferMs).toISOString()
+              : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            return q.where("updated_at", ">", bufferedSyncTime);
+          } else {
+            // Unsynced device initial connect: bound query size
+            return q.limit(150);
+          }
+        });
 
         queries.forEach(q => {
           const unsub = q.onSnapshot(snapshot => {
@@ -2147,7 +2400,7 @@ seedMockData()
 let lastFocusSyncTime = 0;
 async function triggerFastSafetySync() {
   const now = Date.now();
-  if (now - lastFocusSyncTime < 10000) return; // 10s debounce
+  if (now - lastFocusSyncTime < 15000) return; // 15s debounce
   lastFocusSyncTime = now;
 
   if (!navigator.onLine) return;
@@ -2159,12 +2412,7 @@ async function triggerFastSafetySync() {
         await firebase.firestore().enableNetwork();
       } catch (e) {}
     }
-    if (typeof window.startFirestoreSync === "function") {
-      const activeStores = window.currentUser
-        ? (window.STORES_TO_SYNC || null)
-        : ["cms_content", "academic_calendar", "gallery_albums", "gallery_images"];
-      window.startFirestoreSync(activeStores);
-    }
+    // Only sync unsaved offline mutations. Existing onSnapshot listeners stay active without burning read quota!
     if (typeof window.syncDirtyRecords === "function") {
       await window.syncDirtyRecords();
     }
@@ -2184,16 +2432,20 @@ if (typeof window !== "undefined") {
   window.addEventListener("focus", triggerFastSafetySync);
   window.addEventListener("online", triggerFastSafetySync);
 
-  // Background Heartbeat: runs every 45s while active to ensure zero stale data
+  // Background Heartbeat: runs every 60s while active to sync dirty offline records
   setInterval(() => {
     if (document.visibilityState === "visible" && navigator.onLine && window.currentUser) {
       triggerFastSafetySync();
     }
-  }, 45000);
+  }, 60000);
 }
 
 // Export objects
 window.db = db;
+window.db.putBatch = db.putBatch;
+window.db.purgeStudentFeeEntriesCleanSlate = purgeStudentFeeEntriesCleanSlate;
+window.isStudentFeeTransaction = isStudentFeeTransaction;
+window.healDatabaseScoresAndProfiles = healDatabaseScoresAndProfiles;
 window.initDB = initDB;
 window.shouldKeepLocalDoc = shouldKeepLocalDoc;
 window.startFirestoreSync = startFirestoreSync;

@@ -615,6 +615,98 @@ body.light-theme .portal-global-watermark {
 }
 
 /* Responsive Tables */
+.table-scroll-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+
+.table-scroll-wrapper > .table-container {
+  margin-bottom: 0;
+}
+
+.table-scroll-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 25;
+  width: 28px;
+  height: 68px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: var(--bg-card);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, background 0.18s ease, border-color 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
+  user-select: none;
+  outline: none;
+}
+
+.table-scroll-nav-btn.is-visible {
+  opacity: 0.88;
+  pointer-events: auto;
+}
+
+.table-scroll-nav-btn.is-visible:hover {
+  opacity: 1;
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #ffffff !important;
+  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.45);
+}
+
+.table-scroll-nav-btn:active {
+  transform: translateY(-50%) scale(0.92);
+}
+
+.table-scroll-nav-left {
+  left: 0;
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+}
+
+.table-scroll-nav-right {
+  right: 0;
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+
+.table-scroll-nav-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.table-scroll-nav-left:hover svg {
+  transform: translateX(-2px);
+}
+
+.table-scroll-nav-right:hover svg {
+  transform: translateX(2px);
+}
+
+@media (max-width: 640px) {
+  .table-scroll-nav-btn {
+    display: none !important;
+  }
+}
+
 .table-container {
   width: 100%;
   overflow-x: auto;

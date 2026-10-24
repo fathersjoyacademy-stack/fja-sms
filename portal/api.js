@@ -142,6 +142,114 @@ const api = {
     return "2026/2027";
   },
 
+  // Safe score extractor: returns { obtained, max, percentage } or null if invalid/NaN
+  extractValidScore(s) {
+    if (!s || typeof s !== "object") return null;
+
+    let obtained = null;
+    let max = null;
+
+    if (s.score_obtained !== undefined && s.score_obtained !== null && s.score_obtained !== "") {
+      const parsed = parseFloat(s.score_obtained);
+      if (!isNaN(parsed) && isFinite(parsed)) obtained = parsed;
+    }
+
+    if (s.max_score !== undefined && s.max_score !== null && s.max_score !== "") {
+      const parsedMax = parseFloat(s.max_score);
+      if (isNaN(parsedMax) || !isFinite(parsedMax) || parsedMax <= 0) {
+        return null; // Explicitly zero or negative max_score is invalid
+      }
+      max = parsedMax;
+    }
+
+    if (obtained === null) {
+      if (s.total_score !== undefined && s.total_score !== null && s.total_score !== "") {
+        const parsedTotal = parseFloat(s.total_score);
+        if (!isNaN(parsedTotal) && isFinite(parsedTotal)) {
+          obtained = parsedTotal;
+          if (max === null) max = 100;
+        }
+      } else if (s.class_score !== undefined || s.ca_score !== undefined || s.exam_score !== undefined) {
+        const cls = parseFloat(s.class_score || s.ca_score || 0);
+        const exm = parseFloat(s.exam_score || 0);
+        if (!isNaN(cls) && !isNaN(exm)) {
+          obtained = cls + exm;
+          if (max === null) max = 100;
+        }
+      }
+    }
+
+    if (obtained === null || isNaN(obtained) || !isFinite(obtained)) return null;
+    if (max === null) max = 100;
+    if (isNaN(max) || !isFinite(max) || max <= 0) return null;
+
+    const pct = (obtained / max) * 100;
+    if (isNaN(pct) || !isFinite(pct) || pct < 0) return null;
+
+    return { obtained, max, percentage: pct };
+  },
+
+  // Safe percentage parser: parses "85%", 85, etc. and returns null if NaN, N/A or invalid
+  parseValidPercentage(val) {
+    if (val === null || val === undefined || val === "" || val === "N/A" || val === "NaN" || val === "undefined") {
+      return null;
+    }
+    const clean = String(val).replace(/%/g, "").trim();
+    const num = parseFloat(clean);
+    if (isNaN(num) || !isFinite(num)) return null;
+    return num;
+  },
+
+  // Determine Ghanaian school academic year from an ISO date string
+  getAcademicYearForDate(dateStr, customCal = null) {
+    if (!dateStr) return "2026/2027";
+    const dStr = String(dateStr).substring(0, 10);
+    const parts = dStr.split("-");
+    if (parts.length < 3) return "2026/2027";
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    if (isNaN(year) || isNaN(month)) return "2026/2027";
+
+    // Academic year runs from September (month 9) to August (month 8)
+    if (month >= 8) {
+      return `${year}/${year + 1}`;
+    } else {
+      return `${year - 1}/${year}`;
+    }
+  },
+
+  // Returns { startDate, endDate } for a specified academic year string
+  getAcademicYearDateRange(academicYear, calendarDoc = null) {
+    const defaultActive = "2026/2027";
+    const targetYear = academicYear || defaultActive;
+    
+    if (calendarDoc) {
+      if (calendarDoc.academic_year === targetYear) {
+        const ct = calendarDoc.canonical_terms || {};
+        const start = calendarDoc.term1_start || (ct.term1 && ct.term1.start_date) || "2026-09-08";
+        const end = calendarDoc.term3_end || (ct.term3 && ct.term3.end_date) || "2027-07-22";
+        return { startDate: start, endDate: end };
+      } else if (calendarDoc.previous_academic_year === targetYear) {
+        const start = calendarDoc.prev_term1_start || "2025-09-02";
+        const end = calendarDoc.prev_term3_end || "2026-07-31";
+        return { startDate: start, endDate: end };
+      }
+    }
+
+    const parts = targetYear.split("/");
+    if (parts.length === 2) {
+      const y1 = parseInt(parts[0], 10);
+      const y2 = parseInt(parts[1], 10);
+      if (!isNaN(y1) && !isNaN(y2)) {
+        return {
+          startDate: `${y1}-09-01`,
+          endDate: `${y2}-07-31`
+        };
+      }
+    }
+    return { startDate: "2026-09-01", endDate: "2027-07-31" };
+  },
+
   async syncToFirebase(storeName, data) {
     if (window.isFirebaseConfigured && window.isFirebaseConfigured() && navigator.onLine) {
       try {
@@ -2095,22 +2203,25 @@ const api = {
         
         if (studScores.length > 0) {
           studScores.forEach(sc => {
-            const classScore = parseFloat(sc.class_score !== undefined ? sc.class_score : (parseFloat(sc.assignment_score || 0) + parseFloat(sc.class_test_score || 0)));
-            const examScore = parseFloat(sc.exam_score || 0);
-            const scTotal = parseFloat(sc.total_score !== undefined ? sc.total_score : (classScore + examScore));
-            total += scTotal;
-            count++;
+            const v = this.extractValidScore(sc);
+            if (v && !isNaN(v.percentage)) {
+              total += v.percentage;
+              count++;
+            }
           });
         } else if (student.term_grades) {
           try {
             const g = JSON.parse(student.term_grades);
             const classScore = parseFloat(g.classScore !== undefined ? g.classScore : (parseFloat(g.assMark || 0) + parseFloat(g.testMark || 0)));
             const examScore = parseFloat(g.examMark || 0);
-            total = classScore + examScore;
-            count = 1;
+            const scTotal = classScore + examScore;
+            if (!isNaN(scTotal)) {
+              total = scTotal;
+              count = 1;
+            }
           } catch (e) {
             total = 0;
-            count = 1;
+            count = 0;
           }
         }
         
@@ -2195,9 +2306,15 @@ const api = {
         subjectBreakdown = studScores.map(sc => {
           const subObj = subjectMap.get(sc.subject_id);
           const subName = subObj ? subObj.subject_name : (sc.subject_name || "General Subject");
-          const classScore = parseFloat(sc.class_score !== undefined ? sc.class_score : (parseFloat(sc.assignment_score || 0) + parseFloat(sc.class_test_score || 0)));
-          const exam = parseFloat(sc.exam_score || 0);
-          const tot = parseFloat(sc.total_score !== undefined ? sc.total_score : (classScore + exam));
+          const classScore = parseFloat(sc.class_score !== undefined ? sc.class_score : (parseFloat(sc.assignment_score || 0) + parseFloat(sc.class_test_score || 0))) || 0;
+          const exam = parseFloat(sc.exam_score || 0) || 0;
+          let tot = classScore + exam;
+          const v = this.extractValidScore(sc);
+          if (v && !isNaN(v.percentage)) {
+            tot = v.percentage;
+          } else if (sc.total_score !== undefined && !isNaN(parseFloat(sc.total_score))) {
+            tot = parseFloat(sc.total_score);
+          }
           const scale = this.getGradeScale(tot);
           
           return {
@@ -2239,9 +2356,10 @@ const api = {
         }));
       }
       
-      // Calculate overall composite average
-      const totalMarks = subjectBreakdown.reduce((sum, s) => sum + s.total_score, 0);
-      const compositeAverage = subjectBreakdown.length > 0 ? parseFloat((totalMarks / subjectBreakdown.length).toFixed(2)) : 0;
+      // Calculate overall composite average safely ignoring NaN or invalid records
+      const validSubjectTotals = subjectBreakdown.map(s => parseFloat(s.total_score)).filter(t => !isNaN(t) && isFinite(t));
+      const totalMarks = validSubjectTotals.reduce((sum, s) => sum + s, 0);
+      const compositeAverage = validSubjectTotals.length > 0 ? parseFloat((totalMarks / validSubjectTotals.length).toFixed(2)) : 0;
       const overallScale = this.getGradeScale(compositeAverage);
 
       // Calculate terminal attendance days (X out of Y days) const studentAtt = await window.db.queryByIndex("attendance", "user_id", studentId) || [];
@@ -2298,6 +2416,7 @@ const api = {
       // 1. Save or update individual subject score row in student_scores
       if (subject_id) {
         const scoreId = `score-${student_id}-${subject_id}-${currentTerm}`;
+        const nowIso = new Date().toISOString();
         const scoreRecord = {
           score_id: scoreId,
           student_id,
@@ -2309,11 +2428,15 @@ const api = {
           class_test_score: classScore,
           exam_score: exam,
           total_score: total,
+          score_obtained: total,
+          max_score: 100,
           grade: scale.grade,
           remarks: scale.remarks,
           term: currentTerm,
           academic_year: currentTermObj.academicYear,
-          updated_at: new Date().toISOString()
+          created_at: nowIso,
+          timestamp: nowIso,
+          updated_at: nowIso
         };
         await window.db.put("student_scores", scoreRecord);
       }
@@ -2332,7 +2455,30 @@ const api = {
         studentObj.term_grades = JSON.stringify(gradesData);
         await window.db.put("users", studentObj);
         
-        // 3. Cryptographic Audit Log
+        // 3. Auto-update student profile's cumulative academic score from valid scores
+        try {
+          const allStudentScores = await window.db.getAll("student_scores") || [];
+          const myScores = allStudentScores.filter(s => s.student_id === student_id);
+          const validPercentages = myScores.map(s => {
+            const v = window.api ? window.api.extractValidScore(s) : null;
+            return v ? v.percentage : null;
+          }).filter(p => p !== null && !isNaN(p));
+
+          if (validPercentages.length > 0) {
+            const avg = validPercentages.reduce((a, b) => a + b, 0) / validPercentages.length;
+            const profileList = await window.db.getByIndex("profiles", "user_id", student_id) || [];
+            const studentProf = profileList[0] || (await window.db.getAll("profiles") || []).find(p => p.user_id === student_id);
+            if (studentProf) {
+              studentProf.cummulative_academic_score = `${avg.toFixed(1)}%`;
+              studentProf.updated_at = new Date().toISOString();
+              await window.db.put("profiles", studentProf);
+            }
+          }
+        } catch (profErr) {
+          console.warn("Could not auto-update student profile academic average:", profErr);
+        }
+
+        // 4. Cryptographic Audit Log
         try {
           if (typeof generateAuditHash === "function") {
             const audits = await window.db.getAll("audit_logs") || [];
