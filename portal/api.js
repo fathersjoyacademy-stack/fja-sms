@@ -2402,7 +2402,7 @@ const api = {
     }
   },
 
-  async saveStudentGrades({ student_id, class_id, subject_id, scores, behavior, promotedByTeacher, actor_id }) {
+  async saveStudentGrades({ student_id, class_id, subject_id, scores, behavior, promotedByTeacher, actor_id, exercises_config, exercise_scores }) {
     if (!window.db || !student_id) return { success: false, message: "Missing student ID" };
     try {
       const currentTerm = this.getCurrentTermName();
@@ -2413,6 +2413,9 @@ const api = {
       const total = classScore + exam;
       const scale = this.getGradeScale(total);
       
+      const resolvedExConfig = exercises_config || (scores && scores.exercises_config) || [];
+      const resolvedExScores = exercise_scores || (scores && scores.exercise_scores) || {};
+
       // 1. Save or update individual subject score row in student_scores
       if (subject_id) {
         const scoreId = `score-${student_id}-${subject_id}-${currentTerm}`;
@@ -2434,6 +2437,8 @@ const api = {
           remarks: scale.remarks,
           term: currentTerm,
           academic_year: currentTermObj.academicYear,
+          exercise_scores: resolvedExScores,
+          exercises_config: resolvedExConfig,
           created_at: nowIso,
           timestamp: nowIso,
           updated_at: nowIso
@@ -2450,7 +2455,9 @@ const api = {
           testMark: classScore,
           examMark: exam,
           promotedByTeacher: !!promotedByTeacher,
-          behavior: behavior || { contribution: 5, sports: 5, arts: 5, social: 5 }
+          behavior: behavior || { contribution: 5, sports: 5, arts: 5, social: 5 },
+          exercise_scores: resolvedExScores,
+          exercises_config: resolvedExConfig
         };
         studentObj.term_grades = JSON.stringify(gradesData);
         await window.db.put("users", studentObj);

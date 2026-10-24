@@ -23,6 +23,208 @@ function formatFullName(user) {
 }
 window.formatFullName = formatFullName;
 
+// =========================================================================
+// UNIVERSAL BUTTON BUSY/DISABLED SHIELD (PREVENTS DUPLICATION OF ACTIONS)
+// =========================================================================
+function installGlobalButtonProtector() {
+  if (typeof window === "undefined") return;
+
+  // 1. Helper to safely lock any button during async work
+  window.withButtonLock = async function(btn, asyncFn) {
+    if (!btn) return asyncFn();
+    if (btn.disabled || btn.getAttribute("data-working") === "true") return;
+    btn.disabled = true;
+    btn.setAttribute("data-working", "true");
+    btn.classList.add("btn-loading");
+    try {
+      return await asyncFn();
+    } finally {
+      btn.disabled = false;
+      btn.removeAttribute("data-working");
+      btn.classList.remove("btn-loading");
+    }
+  };
+
+  // 2. Intercept EventTarget.prototype.addEventListener for click & submit
+  if (window.EventTarget && EventTarget.prototype.addEventListener) {
+    const originalAddEventListener = EventTarget.prototype.addEventListener;
+    const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
+    const listenerMap = new WeakMap();
+
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      if ((type === "click" || type === "submit") && typeof listener === "function") {
+        const wrappedListener = function(event) {
+          const isClick = type === "click";
+          let btn = null;
+
+          if (isClick) {
+            btn = (event && event.target && event.target.closest)
+              ? event.target.closest("button, input[type='submit'], input[type='button'], .btn")
+              : (this instanceof HTMLButtonElement ? this : null);
+          } else if (type === "submit") {
+            btn = (this && this.querySelector)
+              ? this.querySelector("button[type='submit'], input[type='submit'], button:not([type='button']):not([type='reset'])")
+              : null;
+          }
+
+          // If button is already marked busy or disabled, stop duplicate action immediately
+          if (btn && (btn.disabled || btn.getAttribute("data-working") === "true")) {
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return false;
+          }
+
+          // Mark busy to guard against rapid double-clicks
+          if (btn) {
+            btn.setAttribute("data-working", "true");
+          }
+
+          let result;
+          try {
+            result = listener.apply(this, arguments);
+          } catch (err) {
+            if (btn) {
+              btn.disabled = false;
+              btn.removeAttribute("data-working");
+              btn.classList.remove("btn-loading");
+            }
+            throw err;
+          }
+
+          // If listener is async and returned a Promise (working in background)
+          if (result && typeof result.then === "function" && btn) {
+            btn.disabled = true;
+            btn.classList.add("btn-loading");
+            return result.finally(() => {
+              btn.disabled = false;
+              btn.removeAttribute("data-working");
+              btn.classList.remove("btn-loading");
+            });
+          } else if (btn) {
+            // Sync action - unlock after minimum debounce
+            setTimeout(() => {
+              if (btn && btn.getAttribute("data-working") === "true" && !btn.classList.contains("btn-loading")) {
+                btn.removeAttribute("data-working");
+              }
+            }, 350);
+          }
+
+          return result;
+        };
+
+        listenerMap.set(listener, wrappedListener);
+        return originalAddEventListener.call(this, type, wrappedListener, options);
+      }
+      return originalAddEventListener.apply(this, arguments);
+    };
+
+    EventTarget.prototype.removeEventListener = function(type, listener, options) {
+      const wrapped = listenerMap.get(listener) || listener;
+      return originalRemoveEventListener.call(this, type, wrapped, options);
+    };
+  }
+
+  // 3. Document-level Capture Phase Guardian for click & submit
+  document.addEventListener("click", function(e) {
+    const btn = e.target && e.target.closest ? e.target.closest("button, input[type='submit'], input[type='button'], .btn") : null;
+    if (!btn) return;
+
+    if (btn.disabled || btn.getAttribute("data-working") === "true" || btn.classList.contains("btn-loading")) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+
+    // Wrap inline onclick if not yet protected
+    if (btn.onclick && typeof btn.onclick === "function" && !btn.onclick.__workingShield) {
+      const origClick = btn.onclick;
+      const shieldedClick = function(ev) {
+        if (btn.disabled || btn.getAttribute("data-working") === "true") {
+          if (ev && ev.preventDefault) ev.preventDefault();
+          if (ev && ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+          return;
+        }
+        btn.setAttribute("data-working", "true");
+        let res;
+        try {
+          res = origClick.apply(this, arguments);
+        } catch (err) {
+          btn.disabled = false;
+          btn.removeAttribute("data-working");
+          btn.classList.remove("btn-loading");
+          throw err;
+        }
+        if (res && typeof res.then === "function") {
+          btn.disabled = true;
+          btn.classList.add("btn-loading");
+          return res.finally(() => {
+            btn.disabled = false;
+            btn.removeAttribute("data-working");
+            btn.classList.remove("btn-loading");
+          });
+        } else {
+          setTimeout(() => {
+            if (btn && !btn.classList.contains("btn-loading")) {
+              btn.removeAttribute("data-working");
+            }
+          }, 350);
+        }
+        return res;
+      };
+      shieldedClick.__workingShield = true;
+      btn.onclick = shieldedClick;
+    }
+  }, true);
+
+  document.addEventListener("submit", function(e) {
+    const form = e.target;
+    if (!form || !form.querySelector) return;
+    const subBtn = form.querySelector("button[type='submit'], input[type='submit'], button:not([type='button']):not([type='reset'])");
+    if (!subBtn) return;
+
+    if (subBtn.disabled || subBtn.getAttribute("data-working") === "true") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+
+    subBtn.setAttribute("data-working", "true");
+    if (form.onsubmit && typeof form.onsubmit === "function" && !form.onsubmit.__workingShield) {
+      const origSubmit = form.onsubmit;
+      const shieldedSubmit = function(ev) {
+        subBtn.disabled = true;
+        subBtn.classList.add("btn-loading");
+        let res;
+        try {
+          res = origSubmit.apply(this, arguments);
+        } catch (err) {
+          subBtn.disabled = false;
+          subBtn.removeAttribute("data-working");
+          subBtn.classList.remove("btn-loading");
+          throw err;
+        }
+        if (res && typeof res.then === "function") {
+          return res.finally(() => {
+            subBtn.disabled = false;
+            subBtn.removeAttribute("data-working");
+            subBtn.classList.remove("btn-loading");
+          });
+        } else {
+          setTimeout(() => {
+            subBtn.disabled = false;
+            subBtn.removeAttribute("data-working");
+            subBtn.classList.remove("btn-loading");
+          }, 500);
+        }
+        return res;
+      };
+      shieldedSubmit.__workingShield = true;
+      form.onsubmit = shieldedSubmit;
+    }
+  }, true);
+}
+installGlobalButtonProtector();
+
 let currentUser = null;
 let currentToken = null;
 
@@ -5170,16 +5372,16 @@ async function renderBroadcastPanel(container) {
             <span id="broadcast-archive-count-badge" class="badge badge-info">0 Archives</span>
           </div>
           <div class="table-container">
-            <table class="table" style="font-size:0.85rem;">
+            <table class="table" style="font-size:0.85rem; width:100%; min-width:880px;">
               <thead>
                 <tr>
-                  <th>Date & Time</th>
-                  <th>Dispatched By</th>
-                  <th>General Target</th>
-                  <th>Conditional Filter</th>
-                  <th>Recipients</th>
-                  <th>Master Template</th>
-                  <th>Action</th>
+                  <th style="width:140px; white-space:nowrap;">Date & Time</th>
+                  <th style="width:130px;">Dispatched By</th>
+                  <th style="width:130px;">General Target</th>
+                  <th style="width:130px;">Conditional Filter</th>
+                  <th style="width:110px; text-align:center;">Recipients</th>
+                  <th style="min-width:220px;">Master Template</th>
+                  <th style="width:90px; text-align:center; white-space:nowrap;">Action</th>
                 </tr>
               </thead>
               <tbody id="broadcast-archive-rows">
@@ -5509,14 +5711,14 @@ async function renderBroadcastPanel(container) {
 
         return `
           <tr>
-            <td style="white-space:nowrap; font-size:0.8rem;">${dateFormatted}</td>
-            <td><strong>${esc(arch.sender_name || 'Admin')}</strong><br><span style="font-size:0.75rem; color:var(--text-muted);">${esc(arch.sender_role || 'Staff')}</span></td>
-            <td><span class="badge badge-info">${esc(genLabel)}</span></td>
-            <td><span class="badge badge-warning">${esc(condLabel)}</span></td>
-            <td><strong style="color:var(--accent-primary);">${arch.recipient_count} contacts</strong></td>
-            <td style="max-width:240px; word-break:break-word; font-size:0.8rem;" title="${esc(arch.master_template || '')}">${esc(preview)}</td>
-            <td>
-              <button type="button" class="btn btn-secondary btn-sm btn-reuse-template" data-template="${esc(arch.master_template || '').replace(/"/g, '&quot;')}" style="font-size:0.75rem; padding:0.2rem 0.5rem; white-space:nowrap;">📋 Reuse</button>
+            <td style="white-space:nowrap; font-size:0.8rem; width:140px;">${dateFormatted}</td>
+            <td style="width:130px;"><strong>${esc(arch.sender_name || 'Admin')}</strong><br><span style="font-size:0.75rem; color:var(--text-muted);">${esc(arch.sender_role || 'Staff')}</span></td>
+            <td style="width:130px;"><span class="badge badge-info">${esc(genLabel)}</span></td>
+            <td style="width:130px;"><span class="badge badge-warning">${esc(condLabel)}</span></td>
+            <td style="width:110px; text-align:center;"><strong style="color:var(--accent-primary);">${arch.recipient_count} contacts</strong></td>
+            <td style="min-width:220px; max-width:320px; white-space:normal; word-break:break-word; line-height:1.45; font-size:0.8rem;" title="${esc(arch.master_template || '')}">${esc(preview)}</td>
+            <td style="width:90px; text-align:center; white-space:nowrap; vertical-align:middle;">
+              <button type="button" class="btn btn-secondary btn-sm btn-reuse-template" data-template="${esc(arch.master_template || '').replace(/"/g, '&quot;')}" style="font-size:0.75rem; padding:0.25rem 0.65rem; white-space:nowrap;">📋 Reuse</button>
             </td>
           </tr>
         `;
@@ -10125,7 +10327,9 @@ async function renderTeacherGrading(container) {
               </select>
               <button type="button" id="btn-quick-remove-subject" class="btn btn-secondary btn-sm" style="min-height:36px; padding:0 0.6rem; color:var(--accent-danger); border-color:rgba(239,68,68,0.3); font-size:0.85rem;" title="Remove this subject from curriculum">🗑️</button>
             </div>
-            <button type="button" id="btn-open-add-subject-modal" class="btn btn-primary btn-sm" style="min-height:36px; padding:0 0.85rem; font-size:0.8rem;">➕ Add Subject</button>
+            <button type="button" id="btn-open-exercises-modal" class="btn btn-secondary btn-sm" style="min-height:36px; padding:0 0.85rem; font-size:0.8rem; border-color:var(--accent-primary); color:var(--accent-primary); font-weight:600;">📋 Class Exercises Setup</button>
+            <button type="button" id="btn-save-all-grades" class="btn btn-primary btn-sm" style="min-height:36px; padding:0 1rem; font-size:0.8rem; font-weight:700;">💾 Save All Grades</button>
+            <button type="button" id="btn-open-add-subject-modal" class="btn btn-secondary btn-sm" style="min-height:36px; padding:0 0.85rem; font-size:0.8rem;">➕ Add Subject</button>
             <button type="button" id="btn-open-manage-subjects-modal" class="btn btn-secondary btn-sm" style="min-height:36px; padding:0 0.85rem; font-size:0.8rem;">⚙️ Manage Subjects</button>
           </div>
 
@@ -10137,16 +10341,16 @@ async function renderTeacherGrading(container) {
 
           <div class="card">
             <div class="table-container">
-              <table class="table">
+              <table class="table" style="min-width:920px;">
                 <thead>
                   <tr>
-                    <th>Student Name</th>
-                    <th>Class Score (Max 50)</th>
-                    <th>Final Exam (Max 50)</th>
-                    <th>Weighted Final Score</th>
-                    <th>Promotion Option</th>
-                    <th>Behavior Metrics Scale (1-5 Star)</th>
-                    <th>Action</th>
+                    <th style="min-width:150px;">Student Name</th>
+                    <th id="th-class-score-header" style="min-width:250px;">Class Score (Max 50)</th>
+                    <th style="width:120px; text-align:center;">Final Exam (Max 50)</th>
+                    <th style="width:130px; text-align:center;">Weighted Final Score</th>
+                    <th style="width:100px; text-align:center;">Promotion Option</th>
+                    <th style="min-width:150px;">Behavior Metrics Scale (1-5 Star)</th>
+                    <th style="width:90px; text-align:center;">Action</th>
                   </tr>
                 </thead>
                 <tbody id="grading-roster-rows">
@@ -10221,6 +10425,54 @@ async function renderTeacherGrading(container) {
             </div>
           </div>
         </div>
+
+        <!-- CONFIGURE CLASS EXERCISES MODAL -->
+        <div id="modal-configure-exercises" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.65); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:9999; padding:1rem;">
+          <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; width:100%; max-width:580px; max-height:90vh; display:flex; flex-direction:column; overflow:hidden;">
+            <div style="padding:1.25rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <h3 style="margin:0; font-size:1.15rem; color:var(--text-primary);">📋 Continuous Assessment Exercises Setup</h3>
+                <p id="modal-exercises-subtitle" style="margin:0.25rem 0 0; font-size:0.8rem; color:var(--text-secondary);">Configure multiple class exercises, quizzes, and tests for this subject</p>
+              </div>
+              <button type="button" id="btn-close-exercises-modal" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer; line-height:1;">&times;</button>
+            </div>
+            
+            <div style="padding:1rem 1.25rem; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:1rem;">
+              <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:8px; padding:0.85rem; font-size:0.82rem; color:var(--text-secondary); line-height:1.45;">
+                💡 <strong>How it works:</strong> Define each exercise/test conducted in class and its total marks (e.g. Test 1 = 20, Test 2 = 30, Test 3 = 50). When entering marks for students, the system calculates the average score across all tests and scales it to the required <strong>50% Continuous Assessment Class Score</strong>.
+              </div>
+              
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                  <label style="font-weight:700; font-size:0.85rem; color:var(--text-primary); margin:0;">Active Exercises / Tests:</label>
+                  <button type="button" id="btn-modal-add-exercise-row" class="btn btn-secondary btn-sm" style="font-size:0.75rem; padding:0.25rem 0.6rem;">➕ Add Another Test</button>
+                </div>
+                <div id="modal-exercise-rows-container" style="display:flex; flex-direction:column; gap:0.5rem;">
+                  <!-- Dynamically generated exercise rows -->
+                </div>
+              </div>
+
+              <!-- Live Scaling Calculation Preview -->
+              <div style="background:rgba(var(--accent-primary-rgb, 59, 130, 246), 0.08); border:1px solid rgba(var(--accent-primary-rgb, 59, 130, 246), 0.25); border-radius:8px; padding:0.85rem; font-size:0.82rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-weight:600; color:var(--text-primary);">Total Combined Max Marks:</span>
+                  <strong id="modal-preview-total-max" style="color:var(--accent-primary); font-size:0.95rem;">100 marks</strong>
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.35rem;">
+                  Scaling Formula: <code>Class Score = (Total Student Score / <span id="modal-preview-total-max-label">100</span>) × 50</code>
+                </div>
+              </div>
+            </div>
+            
+            <div style="padding:1rem 1.25rem; border-top:1px solid var(--border-color); background:var(--bg-primary); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+              <button type="button" id="btn-modal-reset-single-score" class="btn btn-secondary btn-sm" style="font-size:0.8rem; color:var(--text-secondary);">Switch to Single Score (Max 50)</button>
+              <div style="display:flex; gap:0.5rem;">
+                <button type="button" id="btn-cancel-exercises-modal" class="btn btn-secondary btn-sm">Cancel</button>
+                <button type="button" id="btn-save-exercises-config" class="btn btn-primary btn-sm">💾 Apply Exercises Setup</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
@@ -10235,6 +10487,20 @@ async function renderTeacherGrading(container) {
     const inputNewSubjectName = document.getElementById("input-new-assessment-subject-name");
     const manageSubjectsList = document.getElementById("manage-assessment-subjects-list");
     const manageSubjectsCount = document.getElementById("manage-assessment-subjects-count");
+
+    const thClassScoreHeader = document.getElementById("th-class-score-header");
+    const btnOpenExercisesModal = document.getElementById("btn-open-exercises-modal");
+    const btnSaveAllGrades = document.getElementById("btn-save-all-grades");
+    const modalConfigureExercises = document.getElementById("modal-configure-exercises");
+    const modalExercisesSubtitle = document.getElementById("modal-exercises-subtitle");
+    const modalExerciseRowsContainer = document.getElementById("modal-exercise-rows-container");
+    const modalPreviewTotalMax = document.getElementById("modal-preview-total-max");
+    const modalPreviewTotalMaxLabel = document.getElementById("modal-preview-total-max-label");
+    const btnCloseExercisesModal = document.getElementById("btn-close-exercises-modal");
+    const btnCancelExercisesModal = document.getElementById("btn-cancel-exercises-modal");
+    const btnModalAddExerciseRow = document.getElementById("btn-modal-add-exercise-row");
+    const btnModalResetSingleScore = document.getElementById("btn-modal-reset-single-score");
+    const btnSaveExercisesConfig = document.getElementById("btn-save-exercises-config");
 
     const btnGradingCurrent = document.getElementById("btn-grading-tab-current");
     const btnGradingHistory = document.getElementById("btn-grading-tab-history");
@@ -10600,13 +10866,362 @@ async function renderTeacherGrading(container) {
       };
     }
 
-    if (studentRoster.length === 0) {
-      rosterBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted)">No active students currently enrolled in ${myClassName}.</td></tr>`;
-      return;
+    // ==========================================
+    // MULTIPLE CLASS EXERCISES CONFIGURATION ENGINE
+    // ==========================================
+    function getActiveExercisesConfigKey(subjId) {
+      const currentTerm = window.api.getCurrentTermName ? window.api.getCurrentTermName() : "Term 1";
+      return `ca_config_${myClassId || 'general'}_${subjId || currentSubjectId}_${currentTerm}`;
     }
 
+    async function loadSubjectExercisesConfig(subjId) {
+      try {
+        const configKey = getActiveExercisesConfigKey(subjId);
+        const configDoc = await window.db.get("cms_content", configKey);
+        if (configDoc && Array.isArray(configDoc.exercises) && configDoc.exercises.length > 0) {
+          return configDoc.exercises;
+        }
+        // Fallback: check recent student_scores records for this subject
+        const currentTerm = window.api.getCurrentTermName ? window.api.getCurrentTermName() : "Term 1";
+        const allScores = await window.db.getAll("student_scores") || [];
+        const scoreWithConfig = allScores.find(sc => sc.subject_id === subjId && (!sc.term || sc.term === currentTerm) && Array.isArray(sc.exercises_config) && sc.exercises_config.length > 0);
+        if (scoreWithConfig) {
+          return scoreWithConfig.exercises_config;
+        }
+      } catch (err) {
+        console.warn("Could not load exercises config:", err);
+      }
+      return [];
+    }
+
+    function openExercisesModal() {
+      if (!modalConfigureExercises) return;
+      const subObj = dbSubjects.find(s => s.subject_id === currentSubjectId);
+      const subName = subObj ? subObj.subject_name : "Subject";
+      if (modalExercisesSubtitle) {
+        modalExercisesSubtitle.innerText = `Subject: ${subName} • Class: ${myClassName}`;
+      }
+
+      loadSubjectExercisesConfig(currentSubjectId).then(existingExercises => {
+        let currentExercises = existingExercises.length > 0 ? JSON.parse(JSON.stringify(existingExercises)) : [
+          { id: "ex_1", name: "Class Exercise 1", max_score: 20 },
+          { id: "ex_2", name: "Class Exercise 2", max_score: 30 },
+          { id: "ex_3", name: "Class Test", max_score: 50 }
+        ];
+
+        function renderModalRows() {
+          if (!modalExerciseRowsContainer) return;
+          modalExerciseRowsContainer.innerHTML = currentExercises.map((ex, idx) => `
+            <div class="exercise-config-row" data-index="${idx}" style="display:flex; align-items:center; gap:0.5rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:6px; padding:0.4rem 0.6rem;">
+              <span class="ex-cfg-num" style="font-size:0.75rem; font-weight:700; color:var(--accent-primary); width:24px;">#${idx + 1}</span>
+              <input type="text" class="form-control ex-cfg-name" placeholder="Exercise Name (e.g. Exercise ${idx + 1})" value="${esc(ex.name || '')}" style="flex:1; min-height:32px; font-size:0.85rem;">
+              <div style="display:flex; align-items:center; gap:0.25rem;">
+                <span style="font-size:0.75rem; color:var(--text-secondary); white-space:nowrap;">Max:</span>
+                <input type="number" min="1" max="1000" step="1" class="form-control ex-cfg-max" placeholder="Max" value="${ex.max_score || 20}" style="width:65px; min-height:32px; text-align:center; font-size:0.85rem;">
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm btn-remove-ex-row" data-index="${idx}" style="min-height:32px; padding:0 0.5rem; color:var(--accent-danger); border-color:rgba(239,68,68,0.3);" title="Remove this test">🗑️</button>
+            </div>
+          `).join("");
+
+          updateModalPreview();
+
+          // Wire row listeners
+          modalExerciseRowsContainer.querySelectorAll(".ex-cfg-name").forEach(inp => {
+            inp.addEventListener("input", (e) => {
+              const row = e.target.closest(".exercise-config-row");
+              const idx = parseInt(row.getAttribute("data-index"), 10);
+              if (currentExercises[idx]) {
+                currentExercises[idx].name = e.target.value;
+              }
+            });
+          });
+
+          modalExerciseRowsContainer.querySelectorAll(".ex-cfg-max").forEach(inp => {
+            inp.addEventListener("input", (e) => {
+              const row = e.target.closest(".exercise-config-row");
+              const idx = parseInt(row.getAttribute("data-index"), 10);
+              if (currentExercises[idx]) {
+                currentExercises[idx].max_score = parseFloat(e.target.value) || 0;
+              }
+              updateModalPreview();
+            });
+          });
+
+          modalExerciseRowsContainer.querySelectorAll(".btn-remove-ex-row").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+              const row = e.target.closest(".exercise-config-row");
+              const idx = parseInt(row.getAttribute("data-index"), 10);
+              if (currentExercises.length <= 1) {
+                showToast("At least one exercise is required. Or switch to Single Score mode.", "warning");
+                return;
+              }
+              currentExercises.splice(idx, 1);
+              renderModalRows();
+            });
+          });
+        }
+
+        function updateModalPreview() {
+          const totalMax = currentExercises.reduce((sum, ex) => sum + (parseFloat(ex.max_score) || 0), 0);
+          if (modalPreviewTotalMax) {
+            modalPreviewTotalMax.innerText = `${totalMax} marks`;
+          }
+          if (modalPreviewTotalMaxLabel) {
+            modalPreviewTotalMaxLabel.innerText = totalMax > 0 ? totalMax : "0";
+          }
+        }
+
+        renderModalRows();
+
+        if (btnModalAddExerciseRow) {
+          btnModalAddExerciseRow.onclick = () => {
+            const nextIdx = currentExercises.length + 1;
+            currentExercises.push({
+              id: `ex_${Date.now()}_${nextIdx}`,
+              name: `Class Exercise ${nextIdx}`,
+              max_score: 20
+            });
+            renderModalRows();
+          };
+        }
+
+        if (btnModalResetSingleScore) {
+          btnModalResetSingleScore.onclick = async () => {
+            try {
+              const configKey = getActiveExercisesConfigKey(currentSubjectId);
+              await window.db.delete("cms_content", configKey);
+            } catch (delErr) {
+              console.warn("Delete config error:", delErr);
+            }
+            modalConfigureExercises.classList.add("portal-hidden");
+            await renderStudentRosterForSubject(currentSubjectId);
+            showToast("Continuous grading switched back to single Class Score (Max 50) mode.", "info");
+          };
+        }
+
+        if (btnSaveExercisesConfig) {
+          btnSaveExercisesConfig.onclick = async () => {
+            // Validate exercises
+            for (let i = 0; i < currentExercises.length; i++) {
+              const ex = currentExercises[i];
+              if (!ex.name || !ex.name.trim()) {
+                showToast(`Please enter a name for Exercise #${i + 1}.`, "danger");
+                return;
+              }
+              const maxNum = parseFloat(ex.max_score);
+              if (isNaN(maxNum) || maxNum <= 0) {
+                showToast(`Please enter a valid max score (> 0) for "${ex.name}".`, "danger");
+                return;
+              }
+              ex.name = ex.name.trim();
+              ex.max_score = maxNum;
+              if (!ex.id) ex.id = `ex_${i + 1}`;
+            }
+
+            const configKey = getActiveExercisesConfigKey(currentSubjectId);
+            await window.db.put("cms_content", {
+              content_key: configKey,
+              class_id: myClassId || "",
+              subject_id: currentSubjectId,
+              exercises: currentExercises,
+              updated_at: new Date().toISOString()
+            });
+
+            modalConfigureExercises.classList.add("portal-hidden");
+            await renderStudentRosterForSubject(currentSubjectId);
+            showToast(`Configured ${currentExercises.length} class exercises for ${subName}!`, "success");
+          };
+        }
+
+        modalConfigureExercises.classList.remove("portal-hidden");
+      });
+    }
+
+    if (btnCloseExercisesModal) {
+      btnCloseExercisesModal.onclick = () => modalConfigureExercises.classList.add("portal-hidden");
+    }
+    if (btnCancelExercisesModal) {
+      btnCancelExercisesModal.onclick = () => modalConfigureExercises.classList.add("portal-hidden");
+    }
+    if (btnOpenExercisesModal) {
+      btnOpenExercisesModal.onclick = () => openExercisesModal();
+    }
+
+    // ==========================================
+    // RECALCULATE STUDENT ROW ENGINE
+    // ==========================================
+    function recalculateStudentRow(userId, activeExercises) {
+      const row = rosterBody.querySelector(`tr[data-user-id="${userId}"]`);
+      if (!row) return;
+
+      const exInputs = row.querySelectorAll(`.exercise-score-input[data-user-id="${userId}"]`);
+      let classScore = 0;
+
+      if (exInputs && exInputs.length > 0 && Array.isArray(activeExercises) && activeExercises.length > 1) {
+        let totalObtained = 0;
+        let totalMax = 0;
+        let hasAnyEntry = false;
+
+        exInputs.forEach(inp => {
+          const max = parseFloat(inp.getAttribute("data-exercise-max")) || 0;
+          const val = inp.value.trim();
+          if (val !== "") {
+            hasAnyEntry = true;
+            const num = parseFloat(val) || 0;
+            if (num > max) {
+              inp.style.borderColor = "var(--accent-danger)";
+            } else {
+              inp.style.borderColor = "";
+            }
+            totalObtained += num;
+          }
+          totalMax += max;
+        });
+
+        if (totalMax > 0 && hasAnyEntry) {
+          classScore = Math.min(50, Math.max(0, (totalObtained / totalMax) * 50));
+        } else {
+          classScore = 0;
+        }
+
+        const badge = row.querySelector(`.scaled-class-score-badge[data-user-id="${userId}"]`);
+        if (badge) {
+          badge.innerText = `${classScore.toFixed(1)} / 50`;
+        }
+        const classScoreInp = row.querySelector(`.score-input-class-score[data-user-id="${userId}"]`);
+        if (classScoreInp) {
+          classScoreInp.value = classScore.toFixed(1);
+        }
+      } else {
+        const classScoreInp = row.querySelector(`.score-input-class-score[data-user-id="${userId}"]`);
+        classScore = parseFloat(classScoreInp ? classScoreInp.value : 0) || 0;
+      }
+
+      const examInp = row.querySelector(`.score-input-exam[data-user-id="${userId}"]`);
+      const exam = parseFloat(examInp ? examInp.value : 0) || 0;
+
+      const total = classScore + exam;
+      const totalCell = row.querySelector(`.score-display-total[data-user-id="${userId}"]`);
+      if (totalCell) {
+        totalCell.innerText = `${total.toFixed(1)} / 100`;
+        if (classScore > 50 || exam > 50) {
+          totalCell.style.color = "var(--accent-danger)";
+        } else {
+          totalCell.style.color = "var(--accent-primary)";
+        }
+      }
+    }
+
+    // ==========================================
+    // SAVE SINGLE STUDENT GRADING
+    // ==========================================
+    async function saveSingleStudentGrading(userId, activeExercises) {
+      const row = rosterBody.querySelector(`tr[data-user-id="${userId}"]`);
+      if (!row) return { success: false, message: "Student row not found" };
+
+      recalculateStudentRow(userId, activeExercises);
+
+      const classScoreInp = row.querySelector(`.score-input-class-score[data-user-id="${userId}"]`);
+      const examInp = row.querySelector(`.score-input-exam[data-user-id="${userId}"]`);
+      const classScore = parseFloat(classScoreInp ? classScoreInp.value : 0) || 0;
+      const exam = parseFloat(examInp ? examInp.value : 0) || 0;
+
+      const contrib = parseInt(row.querySelector(`.b-contrib[data-user-id="${userId}"]`)?.value, 10) || 5;
+      const sports = parseInt(row.querySelector(`.b-sports[data-user-id="${userId}"]`)?.value, 10) || 5;
+      const arts = parseInt(row.querySelector(`.b-arts[data-user-id="${userId}"]`)?.value, 10) || 5;
+      const social = parseInt(row.querySelector(`.b-social[data-user-id="${userId}"]`)?.value, 10) || 5;
+
+      if (classScore > 50 || exam > 50) {
+        showToast("Validation Error: Class Score (Max 50) or Exam (Max 50) marks exceeded thresholds.", "danger");
+        return { success: false, message: "Validation error" };
+      }
+
+      const promoteChk = row.querySelector(`.promote-chk[data-user-id="${userId}"]`);
+      const isTeacherPromoted = promoteChk ? promoteChk.checked : false;
+
+      // Extract individual exercise scores
+      const exScores = {};
+      row.querySelectorAll(`.exercise-score-input[data-user-id="${userId}"]`).forEach(inp => {
+        const exId = inp.getAttribute("data-exercise-id");
+        const val = inp.value.trim();
+        if (val !== "") {
+          exScores[exId] = parseFloat(val) || 0;
+        }
+      });
+
+      const res = await window.api.saveStudentGrades({
+        student_id: userId,
+        class_id: myClassId,
+        subject_id: currentSubjectId,
+        scores: {
+          classScore,
+          examMark: exam,
+          ca_score: classScore,
+          class_score: classScore,
+          assMark: classScore * 0.4,
+          testMark: classScore * 0.6,
+          exercise_scores: exScores,
+          exercises_config: activeExercises
+        },
+        exercises_config: activeExercises,
+        exercise_scores: exScores,
+        behavior: { contribution: contrib, sports, arts, social },
+        promotedByTeacher: isTeacherPromoted,
+        actor_id: currentUser.user_id
+      });
+
+      if (res && res.success) {
+        const finalScore = classScore + exam;
+        await checkAndAdvanceStudentGrade(userId, isTeacherPromoted, finalScore);
+      }
+      return res;
+    }
+
+    // ==========================================
+    // RENDER STUDENT ROSTER FOR SUBJECT
+    // ==========================================
     async function renderStudentRosterForSubject(subjectId) {
       currentSubjectId = subjectId;
+
+      if (studentRoster.length === 0) {
+        rosterBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted)">No active students currently enrolled in ${myClassName}.</td></tr>`;
+        return;
+      }
+
+      const activeExercises = await loadSubjectExercisesConfig(subjectId);
+      const totalRawMax = activeExercises.reduce((sum, e) => sum + (parseFloat(e.max_score) || 0), 0);
+      const isMultiTest = activeExercises.length > 1;
+
+      // Update Table Header for Class Score
+      if (thClassScoreHeader) {
+        if (isMultiTest) {
+          thClassScoreHeader.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+              <span style="font-weight:700;">Class Score (Max 50)</span>
+              <button type="button" class="btn btn-secondary btn-sm btn-trigger-setup-tests" style="font-size:0.72rem; padding:0.15rem 0.5rem; height:24px; font-weight:600;">⚙️ Setup Tests</button>
+            </div>
+            <div style="font-size:0.75rem; color:var(--accent-primary); font-weight:normal; margin-top:2px;">
+              ${activeExercises.length} tests (${totalRawMax} raw) &rarr; Scaled to 50%
+            </div>
+          `;
+        } else {
+          thClassScoreHeader.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+              <span style="font-weight:700;">Class Score (Max 50)</span>
+              <button type="button" class="btn btn-secondary btn-sm btn-trigger-setup-tests" style="font-size:0.72rem; padding:0.15rem 0.5rem; height:24px; font-weight:600;">➕ Multiple Tests</button>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-muted); font-weight:normal; margin-top:2px;">
+              Single score mode (Max 50)
+            </div>
+          `;
+        }
+      }
+
+      // Update Toolbar Button text
+      if (btnOpenExercisesModal) {
+        btnOpenExercisesModal.innerHTML = isMultiTest ? `📋 Class Exercises (${activeExercises.length} Tests)` : `📋 Class Exercises Setup`;
+      }
+
       const allScores = await window.db.getAll("student_scores") || [];
       const currentTerm = window.api.getCurrentTermName ? window.api.getCurrentTermName() : "Term 1";
 
@@ -10618,6 +11233,7 @@ async function renderTeacherGrading(container) {
 
         let classScore = 0;
         let examMark = 0;
+        const studentExScores = (scoreRec && scoreRec.exercise_scores) || (stored && stored.exercise_scores) || {};
 
         if (scoreRec) {
           classScore = parseFloat(scoreRec.class_score !== undefined ? scoreRec.class_score : (scoreRec.ca_score !== undefined ? scoreRec.ca_score : (parseFloat(scoreRec.assignment_score || 0) + parseFloat(scoreRec.class_test_score || 0))));
@@ -10627,30 +11243,82 @@ async function renderTeacherGrading(container) {
           examMark = parseFloat(stored.examMark || 0);
         }
 
+        // If multiple exercises are configured, recompute class score from student's exercise scores if present
+        if (isMultiTest && totalRawMax > 0 && Object.keys(studentExScores).length > 0) {
+          let sumObtained = 0;
+          let hasAny = false;
+          activeExercises.forEach(ex => {
+            if (studentExScores[ex.id] !== undefined && studentExScores[ex.id] !== "") {
+              hasAny = true;
+              sumObtained += parseFloat(studentExScores[ex.id]) || 0;
+            }
+          });
+          if (hasAny) {
+            classScore = Math.min(50, Math.max(0, (sumObtained / totalRawMax) * 50));
+          }
+        }
+
         const currentFinal = classScore + examMark;
 
         return `
           <tr data-user-id="${s.user_id}">
-            <td>
+            <td style="vertical-align:middle;">
               <strong>${formatFullName(s)}</strong>
               <div style="font-size:0.75rem; color:var(--text-secondary);">${s.uid || ''}</div>
             </td>
-            <td>
-              <input type="number" min="0" max="50" step="0.5" class="input score-input score-input-class-score" data-user-id="${s.user_id}" value="${classScore}" style="max-width:90px; text-align:center;">
+            <td style="vertical-align:middle;">
+              ${isMultiTest ? `
+                <div style="display:flex; flex-direction:column; gap:0.35rem; min-width:240px;">
+                  <div style="display:flex; gap:0.35rem; flex-wrap:wrap; align-items:center;">
+                    ${activeExercises.map(ex => {
+                      const exVal = (studentExScores[ex.id] !== undefined && studentExScores[ex.id] !== null) ? studentExScores[ex.id] : '';
+                      return `
+                        <div style="display:flex; flex-direction:column; align-items:center; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; padding:0.2rem 0.35rem; min-width:62px;">
+                          <span style="font-size:0.7rem; font-weight:600; color:var(--text-secondary); max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(ex.name)}">${esc(ex.name)}</span>
+                          <div style="display:flex; align-items:center; gap:0.15rem; margin-top:2px;">
+                            <input type="number" min="0" max="${ex.max_score}" step="0.5" 
+                                   class="input score-input exercise-score-input" 
+                                   data-user-id="${s.user_id}" 
+                                   data-exercise-id="${ex.id}" 
+                                   data-exercise-max="${ex.max_score}" 
+                                   value="${exVal !== '' ? exVal : ''}" 
+                                   placeholder="0" 
+                                   style="width:46px; height:28px; text-align:center; font-size:0.85rem; padding:2px;">
+                            <span style="font-size:0.72rem; color:var(--text-muted); font-weight:600;">/${ex.max_score}</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(var(--accent-primary-rgb, 59, 130, 246), 0.08); border:1px solid rgba(var(--accent-primary-rgb, 59, 130, 246), 0.2); border-radius:6px; padding:0.2rem 0.5rem; font-size:0.78rem;">
+                    <span style="color:var(--text-secondary);">Scaled (50%):</span>
+                    <strong class="scaled-class-score-badge" data-user-id="${s.user_id}" style="color:var(--accent-primary); font-size:0.85rem;">
+                      ${classScore.toFixed(1)} / 50
+                    </strong>
+                  </div>
+                  <input type="hidden" class="score-input-class-score" data-user-id="${s.user_id}" value="${classScore.toFixed(1)}">
+                </div>
+              ` : `
+                <div style="display:flex; align-items:center; gap:0.35rem;">
+                  <input type="number" min="0" max="50" step="0.5" class="input score-input score-input-class-score" data-user-id="${s.user_id}" value="${classScore}" style="max-width:85px; text-align:center;">
+                  <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">/ 50</span>
+                  <button type="button" class="btn btn-secondary btn-sm btn-trigger-setup-tests" style="padding:0.2rem 0.45rem; font-size:0.72rem; height:28px;" title="Setup multiple class exercises">➕ Tests</button>
+                </div>
+              `}
             </td>
-            <td>
-              <input type="number" min="0" max="50" step="0.5" class="input score-input score-input-exam" data-user-id="${s.user_id}" value="${examMark}" style="max-width:90px; text-align:center;">
+            <td style="vertical-align:middle; text-align:center;">
+              <input type="number" min="0" max="50" step="0.5" class="input score-input score-input-exam" data-user-id="${s.user_id}" value="${examMark}" style="max-width:85px; text-align:center; margin:0 auto;">
             </td>
-            <td style="font-weight:700; color:var(--accent-primary);" class="score-display-total" data-user-id="${s.user_id}">
+            <td style="font-weight:700; color:var(--accent-primary); vertical-align:middle; text-align:center;" class="score-display-total" data-user-id="${s.user_id}">
               ${currentFinal.toFixed(1)} / 100
             </td>
-            <td>
-              <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; cursor:pointer;">
+            <td style="vertical-align:middle; text-align:center;">
+              <label style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.85rem; cursor:pointer;">
                 <input type="checkbox" class="promote-chk" data-user-id="${s.user_id}" ${stored.promotedByTeacher ? 'checked' : ''}>
                 Promote
               </label>
             </td>
-            <td>
+            <td style="vertical-align:middle;">
               <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 0.25rem; font-size:0.75rem;">
                 <label>Contrib: <input type="number" min="1" max="5" class="b-contrib" data-user-id="${s.user_id}" value="${stored.behavior ? stored.behavior.contribution : 5}" style="width:40px; text-align:center;"></label>
                 <label>Sports: <input type="number" min="1" max="5" class="b-sports" data-user-id="${s.user_id}" value="${stored.behavior ? stored.behavior.sports : 5}" style="width:40px; text-align:center;"></label>
@@ -10658,7 +11326,7 @@ async function renderTeacherGrading(container) {
                 <label>Social: <input type="number" min="1" max="5" class="b-social" data-user-id="${s.user_id}" value="${stored.behavior ? stored.behavior.social : 5}" style="width:40px; text-align:center;"></label>
               </div>
             </td>
-            <td>
+            <td style="vertical-align:middle; text-align:center;">
               <button class="btn btn-primary btn-save-grade" data-user-id="${s.user_id}" style="padding:0.35rem 0.75rem; font-size:0.85rem;">Save</button>
             </td>
           </tr>
@@ -10666,76 +11334,40 @@ async function renderTeacherGrading(container) {
       }).join("");
 
       // Real-time calculation listeners
-      rosterBody.querySelectorAll(".score-input").forEach(input => {
+      rosterBody.querySelectorAll(".exercise-score-input").forEach(input => {
         input.addEventListener("input", () => {
           const id = input.getAttribute("data-user-id");
-          const classScore = parseFloat(rosterBody.querySelector(`.score-input-class-score[data-user-id="${id}"]`).value) || 0;
-          const exam = parseFloat(rosterBody.querySelector(`.score-input-exam[data-user-id="${id}"]`).value) || 0;
-          
-          const total = classScore + exam;
-          const totalCell = rosterBody.querySelector(`.score-display-total[data-user-id="${id}"]`);
-          if (totalCell) {
-            totalCell.innerText = `${total.toFixed(1)} / 100`;
-            if (classScore > 50 || exam > 50) {
-              totalCell.style.color = "var(--accent-danger)";
-            } else {
-              totalCell.style.color = "var(--accent-primary)";
-            }
-          }
+          recalculateStudentRow(id, activeExercises);
         });
+      });
+
+      rosterBody.querySelectorAll(".score-input-class-score, .score-input-exam").forEach(input => {
+        input.addEventListener("input", () => {
+          const id = input.getAttribute("data-user-id");
+          recalculateStudentRow(id, activeExercises);
+        });
+      });
+
+      // Quick trigger setup tests buttons
+      document.querySelectorAll(".btn-trigger-setup-tests").forEach(btn => {
+        btn.addEventListener("click", () => openExercisesModal());
       });
 
       // Save individual student grading
       rosterBody.querySelectorAll(".btn-save-grade").forEach(btn => {
         btn.addEventListener("click", async () => {
           const id = btn.getAttribute("data-user-id");
-          
-          const classScore = parseFloat(rosterBody.querySelector(`.score-input-class-score[data-user-id="${id}"]`).value) || 0;
-          const exam = parseFloat(rosterBody.querySelector(`.score-input-exam[data-user-id="${id}"]`).value) || 0;
-
-          const contrib = parseInt(rosterBody.querySelector(`.b-contrib[data-user-id="${id}"]`).value, 10) || 5;
-          const sports = parseInt(rosterBody.querySelector(`.b-sports[data-user-id="${id}"]`).value, 10) || 5;
-          const arts = parseInt(rosterBody.querySelector(`.b-arts[data-user-id="${id}"]`).value, 10) || 5;
-          const social = parseInt(rosterBody.querySelector(`.b-social[data-user-id="${id}"]`).value, 10) || 5;
-
-          // Validation checks: 50% Class Score, 50% Exams
-          if (classScore > 50 || exam > 50) {
-            showToast("Validation Error: Class Score (Max 50) or Exam (Max 50) marks exceeded thresholds.", "danger");
-            return;
-          }
-
           btn.disabled = true;
           const origText = btn.innerText;
           btn.innerText = "Saving...";
 
           try {
-            const promoteChk = rosterBody.querySelector(`.promote-chk[data-user-id="${id}"]`);
-            const isTeacherPromoted = promoteChk ? promoteChk.checked : false;
-
-            const res = await window.api.saveStudentGrades({
-              student_id: id,
-              class_id: myClassId,
-              subject_id: currentSubjectId,
-              scores: {
-                classScore,
-                examMark: exam,
-                ca_score: classScore,
-                class_score: classScore,
-                assMark: classScore * 0.4,
-                testMark: classScore * 0.6
-              },
-              behavior: { contribution: contrib, sports, arts, social },
-              promotedByTeacher: isTeacherPromoted,
-              actor_id: currentUser.user_id
-            });
-
+            const res = await saveSingleStudentGrading(id, activeExercises);
             if (res && res.success) {
               const studentObj = await window.db.get("users", id);
               const subObj = dbSubjects.find(s => s.subject_id === currentSubjectId);
               const subName = subObj ? subObj.subject_name : "Subject";
               showToast(`${subName} continuous grading saved for ${studentObj ? studentObj.first_name : 'student'}!`, "success");
-              const finalScore = classScore + exam;
-              await checkAndAdvanceStudentGrade(id, isTeacherPromoted, finalScore);
             } else {
               showToast(res ? res.message : "Error saving grade", "danger");
             }
@@ -10748,6 +11380,32 @@ async function renderTeacherGrading(container) {
           }
         });
       });
+
+      // Save all grades button
+      if (btnSaveAllGrades) {
+        btnSaveAllGrades.onclick = async () => {
+          btnSaveAllGrades.disabled = true;
+          const origText = btnSaveAllGrades.innerText;
+          btnSaveAllGrades.innerText = "Saving all grades...";
+          let savedCount = 0;
+
+          try {
+            for (const s of studentRoster) {
+              const res = await saveSingleStudentGrading(s.user_id, activeExercises);
+              if (res && res.success) savedCount++;
+            }
+            const subObj = dbSubjects.find(s => s.subject_id === currentSubjectId);
+            const subName = subObj ? subObj.subject_name : "Subject";
+            showToast(`Successfully saved ${subName} continuous assessment scores for ${savedCount} / ${studentRoster.length} students!`, "success");
+          } catch (allErr) {
+            console.error("Save all grades failed:", allErr);
+            showToast("Error saving all grades: " + (allErr.message || allErr), "danger");
+          } finally {
+            btnSaveAllGrades.disabled = false;
+            btnSaveAllGrades.innerText = origText;
+          }
+        };
+      }
     }
 
     if (subjectSelect) {
@@ -10760,7 +11418,7 @@ async function renderTeacherGrading(container) {
     window._refreshTeacherGrading = async () => {
       if (currentSubjectId) {
         const activeEl = document.activeElement;
-        const isTypingScore = activeEl && activeEl.classList && activeEl.classList.contains("score-input");
+        const isTypingScore = activeEl && activeEl.classList && (activeEl.classList.contains("score-input") || activeEl.classList.contains("exercise-score-input"));
         if (!isTypingScore) {
           await renderStudentRosterForSubject(currentSubjectId);
         }
