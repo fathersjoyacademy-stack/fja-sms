@@ -24,206 +24,22 @@ function formatFullName(user) {
 window.formatFullName = formatFullName;
 
 // =========================================================================
-// UNIVERSAL BUTTON BUSY/DISABLED SHIELD (PREVENTS DUPLICATION OF ACTIONS)
+// SAFE BUTTON LOCK HELPER (OPT-IN NON-INVASIVE ACTION DEBOUNCE)
 // =========================================================================
-function installGlobalButtonProtector() {
-  if (typeof window === "undefined") return;
-
-  // 1. Helper to safely lock any button during async work
-  window.withButtonLock = async function(btn, asyncFn) {
-    if (!btn) return asyncFn();
-    if (btn.disabled || btn.getAttribute("data-working") === "true") return;
-    btn.disabled = true;
-    btn.setAttribute("data-working", "true");
-    btn.classList.add("btn-loading");
-    try {
-      return await asyncFn();
-    } finally {
-      btn.disabled = false;
-      btn.removeAttribute("data-working");
-      btn.classList.remove("btn-loading");
-    }
-  };
-
-  // 2. Intercept EventTarget.prototype.addEventListener for click & submit
-  if (window.EventTarget && EventTarget.prototype.addEventListener) {
-    const originalAddEventListener = EventTarget.prototype.addEventListener;
-    const originalRemoveEventListener = EventTarget.prototype.removeEventListener;
-    const listenerMap = new WeakMap();
-
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-      if ((type === "click" || type === "submit") && typeof listener === "function") {
-        const wrappedListener = function(event) {
-          const isClick = type === "click";
-          let btn = null;
-
-          if (isClick) {
-            btn = (event && event.target && event.target.closest)
-              ? event.target.closest("button, input[type='submit'], input[type='button'], .btn")
-              : (this instanceof HTMLButtonElement ? this : null);
-          } else if (type === "submit") {
-            btn = (this && this.querySelector)
-              ? this.querySelector("button[type='submit'], input[type='submit'], button:not([type='button']):not([type='reset'])")
-              : null;
-          }
-
-          // If button is already marked busy or disabled, stop duplicate action immediately
-          if (btn && (btn.disabled || btn.getAttribute("data-working") === "true")) {
-            if (event.preventDefault) event.preventDefault();
-            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
-            return false;
-          }
-
-          // Mark busy to guard against rapid double-clicks
-          if (btn) {
-            btn.setAttribute("data-working", "true");
-          }
-
-          let result;
-          try {
-            result = listener.apply(this, arguments);
-          } catch (err) {
-            if (btn) {
-              btn.disabled = false;
-              btn.removeAttribute("data-working");
-              btn.classList.remove("btn-loading");
-            }
-            throw err;
-          }
-
-          // If listener is async and returned a Promise (working in background)
-          if (result && typeof result.then === "function" && btn) {
-            btn.disabled = true;
-            btn.classList.add("btn-loading");
-            return result.finally(() => {
-              btn.disabled = false;
-              btn.removeAttribute("data-working");
-              btn.classList.remove("btn-loading");
-            });
-          } else if (btn) {
-            // Sync action - unlock after minimum debounce
-            setTimeout(() => {
-              if (btn && btn.getAttribute("data-working") === "true" && !btn.classList.contains("btn-loading")) {
-                btn.removeAttribute("data-working");
-              }
-            }, 350);
-          }
-
-          return result;
-        };
-
-        listenerMap.set(listener, wrappedListener);
-        return originalAddEventListener.call(this, type, wrappedListener, options);
-      }
-      return originalAddEventListener.apply(this, arguments);
-    };
-
-    EventTarget.prototype.removeEventListener = function(type, listener, options) {
-      const wrapped = listenerMap.get(listener) || listener;
-      return originalRemoveEventListener.call(this, type, wrapped, options);
-    };
+window.withButtonLock = async function(btn, asyncFn) {
+  if (!btn) return typeof asyncFn === "function" ? asyncFn() : null;
+  if (btn.disabled || btn.getAttribute("data-busy") === "true") return;
+  btn.disabled = true;
+  btn.setAttribute("data-busy", "true");
+  btn.classList.add("btn-loading");
+  try {
+    return await asyncFn();
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute("data-busy");
+    btn.classList.remove("btn-loading");
   }
-
-  // 3. Document-level Capture Phase Guardian for click & submit
-  document.addEventListener("click", function(e) {
-    const btn = e.target && e.target.closest ? e.target.closest("button, input[type='submit'], input[type='button'], .btn") : null;
-    if (!btn) return;
-
-    if (btn.disabled || btn.getAttribute("data-working") === "true" || btn.classList.contains("btn-loading")) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      return;
-    }
-
-    // Wrap inline onclick if not yet protected
-    if (btn.onclick && typeof btn.onclick === "function" && !btn.onclick.__workingShield) {
-      const origClick = btn.onclick;
-      const shieldedClick = function(ev) {
-        if (btn.disabled || btn.getAttribute("data-working") === "true") {
-          if (ev && ev.preventDefault) ev.preventDefault();
-          if (ev && ev.stopImmediatePropagation) ev.stopImmediatePropagation();
-          return;
-        }
-        btn.setAttribute("data-working", "true");
-        let res;
-        try {
-          res = origClick.apply(this, arguments);
-        } catch (err) {
-          btn.disabled = false;
-          btn.removeAttribute("data-working");
-          btn.classList.remove("btn-loading");
-          throw err;
-        }
-        if (res && typeof res.then === "function") {
-          btn.disabled = true;
-          btn.classList.add("btn-loading");
-          return res.finally(() => {
-            btn.disabled = false;
-            btn.removeAttribute("data-working");
-            btn.classList.remove("btn-loading");
-          });
-        } else {
-          setTimeout(() => {
-            if (btn && !btn.classList.contains("btn-loading")) {
-              btn.removeAttribute("data-working");
-            }
-          }, 350);
-        }
-        return res;
-      };
-      shieldedClick.__workingShield = true;
-      btn.onclick = shieldedClick;
-    }
-  }, true);
-
-  document.addEventListener("submit", function(e) {
-    const form = e.target;
-    if (!form || !form.querySelector) return;
-    const subBtn = form.querySelector("button[type='submit'], input[type='submit'], button:not([type='button']):not([type='reset'])");
-    if (!subBtn) return;
-
-    if (subBtn.disabled || subBtn.getAttribute("data-working") === "true") {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      return;
-    }
-
-    subBtn.setAttribute("data-working", "true");
-    if (form.onsubmit && typeof form.onsubmit === "function" && !form.onsubmit.__workingShield) {
-      const origSubmit = form.onsubmit;
-      const shieldedSubmit = function(ev) {
-        subBtn.disabled = true;
-        subBtn.classList.add("btn-loading");
-        let res;
-        try {
-          res = origSubmit.apply(this, arguments);
-        } catch (err) {
-          subBtn.disabled = false;
-          subBtn.removeAttribute("data-working");
-          subBtn.classList.remove("btn-loading");
-          throw err;
-        }
-        if (res && typeof res.then === "function") {
-          return res.finally(() => {
-            subBtn.disabled = false;
-            subBtn.removeAttribute("data-working");
-            subBtn.classList.remove("btn-loading");
-          });
-        } else {
-          setTimeout(() => {
-            subBtn.disabled = false;
-            subBtn.removeAttribute("data-working");
-            subBtn.classList.remove("btn-loading");
-          }, 500);
-        }
-        return res;
-      };
-      shieldedSubmit.__workingShield = true;
-      form.onsubmit = shieldedSubmit;
-    }
-  }, true);
-}
-installGlobalButtonProtector();
+};
 
 let currentUser = null;
 let currentToken = null;
@@ -954,35 +770,62 @@ async function handlePublicAdmission(e) {
 async function handlePortalLogin(e) {
   e.preventDefault();
 
-  const uidOrPhone = (document.getElementById("login-uid").value || "").trim();
-  const password = document.getElementById("login-password").value || "";
-
-  if (!window.api) {
-    showToast("Authentication API currently offline.", "danger");
-    return;
+  const form = document.getElementById("form-portal-login");
+  const submitBtn = form ? form.querySelector("button[type='submit']") : null;
+  if (submitBtn && submitBtn.disabled) return;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add("btn-loading");
   }
 
-  const result = await window.api.login(uidOrPhone, password);
-  if (result.success) {
-    currentToken = result.token;
-    currentUser = result.user;
-    
-    // Persist session to survive browser reloads & prevent auto-logout
-    localStorage.setItem("fja_session_token", result.token);
-    localStorage.setItem("fja_session_user", JSON.stringify(result.user));
+  try {
+    const uidOrPhone = (document.getElementById("login-uid").value || "").trim();
+    const password = document.getElementById("login-password").value || "";
 
-    enterDashboardPortal();
-  } else {
-    showToast(result.message || "Invalid credentials", "danger");
+    if (!window.api) {
+      showToast("Authentication API currently offline.", "danger");
+      return;
+    }
+
+    const result = await window.api.login(uidOrPhone, password);
+    if (result.success) {
+      currentToken = result.token;
+      currentUser = result.user;
+      
+      // Persist session to survive browser reloads & prevent auto-logout
+      localStorage.setItem("fja_session_token", result.token);
+      localStorage.setItem("fja_session_user", JSON.stringify(result.user));
+
+      enterDashboardPortal();
+    } else {
+      showToast(result.message || "Invalid credentials", "danger");
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove("btn-loading");
+    }
   }
 }
 
 async function handleForcedReset(e) {
   e.preventDefault();
+  const form = document.getElementById("form-forced-reset");
+  const submitBtn = form ? form.querySelector("button[type='submit']") : null;
+  if (submitBtn && submitBtn.disabled) return;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add("btn-loading");
+  }
+
   const newPwd = document.getElementById("reset-new-password").value;
   
   if (newPwd.length < 4) {
     showToast("Password must be at least 4 characters long.", "warning");
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove("btn-loading");
+    }
     return;
   }
 
@@ -1018,6 +861,11 @@ async function handleForcedReset(e) {
   } catch (err) {
     console.error("Forced password reset failed:", err);
     showToast("Could not update password.", "danger");
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove("btn-loading");
+    }
   }
 }
 

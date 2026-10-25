@@ -479,19 +479,19 @@ const api = {
       // Check if Firebase is configured
       if (window.isFirebaseConfigured && window.isFirebaseConfigured()) {
         try {
-          const authEmail = `${user.uid}@fathersjoy.com`;
+          const authEmail = `${user.uid.toLowerCase()}@fathersjoy.com`;
           const currentAnon = firebase.auth().currentUser;
-          if (currentAnon && currentAnon.isAnonymous) {
-            try { await currentAnon.delete(); } catch(e) {}
-          }
           const authResult = await firebase.auth().signInWithEmailAndPassword(authEmail, password);
           const firebaseUser = authResult.user;
           console.log("Firebase Auth sign-in successful:", firebaseUser.uid);
+          if (currentAnon && currentAnon.isAnonymous && currentAnon.uid !== firebaseUser.uid) {
+            try { await currentAnon.delete(); } catch(e) {}
+          }
         } catch (authErr) {
           // Auto-provision user in Firebase Auth if correct password entered locally
           if (isValidLocally) {
             try {
-              const authEmail = `${user.uid}@fathersjoy.com`;
+              const authEmail = `${user.uid.toLowerCase()}@fathersjoy.com`;
               const createResult = await firebase.auth().createUserWithEmailAndPassword(authEmail, password);
               console.log("Firebase Auth auto-provisioning successful:", createResult.user.uid);
             } catch (createErr) {
@@ -503,6 +503,9 @@ const api = {
             }
           } else {
             console.error("Firebase Auth sign-in failed:", authErr);
+            if (!firebase.auth().currentUser && typeof window.ensureFirebaseAuth === "function") {
+              try { await window.ensureFirebaseAuth(); } catch (e) {}
+            }
             return { success: false, message: "Authentication failed. Incorrect password." };
           }
         }

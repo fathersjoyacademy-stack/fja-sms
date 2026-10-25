@@ -354,6 +354,15 @@ async function initDB() {
 let authPromise = null;
 async function ensureFirebaseAuth() {
   if (typeof firebase === "undefined" || !firebase.auth) return null;
+  if (!firebase.apps || firebase.apps.length === 0) {
+    if (window.firebaseConfig && window.firebaseConfig.projectId && window.firebaseConfig.projectId !== "YOUR_PROJECT_ID") {
+      try {
+        firebase.initializeApp(window.firebaseConfig);
+      } catch (e) {}
+    } else {
+      return null;
+    }
+  }
   const auth = firebase.auth();
   if (auth.currentUser) return auth.currentUser;
   if (authPromise) return authPromise;
@@ -1982,7 +1991,10 @@ function clearAllFirestoreListeners() {
 // Role-based store pruning to avoid syncing unneeded collections on free tier
 function getStoresForUserRole(role) {
   if (!role) {
-    return ["cms_content", "academic_calendar", "gallery_albums", "gallery_images"];
+    return [
+      "users", "profiles", "parent_profiles", "parent_student_relations",
+      "cms_content", "academic_calendar", "gallery_albums", "gallery_images"
+    ];
   }
   if (role === "Student") {
     return [
@@ -2293,7 +2305,7 @@ async function startFirestoreSync(specificStores = null) {
 
         // Apply Delta filter to onSnapshot queries to avoid reading the whole collection on connect
         const queries = baseQueries.map(q => {
-          if (storeName === "academic_calendar") return q; // single doc
+          if (storeName === "academic_calendar" || storeName === "users" || storeName === "profiles") return q;
           if (lastSync) {
             const safetyBufferMs = 15 * 60 * 1000;
             const lastSyncMs = new Date(lastSync).getTime();
