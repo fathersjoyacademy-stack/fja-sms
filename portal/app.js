@@ -14253,6 +14253,10 @@ async function renderFinanceAccounts(container) {
                   <option value="Other Incomes">Other Income Sources</option>
                 </select>
               </div>
+              <div class="form-group portal-hidden" id="inc-custom-type-group">
+                <label class="form-label">Specific Income Type / Source <span style="color:var(--accent-danger);">*</span></label>
+                <input type="text" id="inc-custom-type" class="form-control" placeholder="e.g. Hall Rental, Graduation Gown, Certificate Fee">
+              </div>
               <div class="horizontal-paired-form">
                 <div class="form-group">
                   <label class="form-label">Amount (GHS)</label>
@@ -14318,6 +14322,10 @@ async function renderFinanceAccounts(container) {
                   <option value="Canteen Raw Materials">Canteen raw materials purchase</option>
                   <option value="Other Operational Expenses">Other Operational Expenses</option>
                 </select>
+              </div>
+              <div class="form-group portal-hidden" id="exp-custom-type-group">
+                <label class="form-label">Specific Expense Type / Description <span style="color:var(--accent-danger);">*</span></label>
+                <input type="text" id="exp-custom-type" class="form-control" placeholder="e.g. Generator Servicing, Sports Equipment, First Aid Refill">
               </div>
               <div class="horizontal-paired-form">
                 <div class="form-group">
@@ -14566,10 +14574,10 @@ async function renderFinanceAccounts(container) {
       document.getElementById("inc-table-body").innerHTML = list.map(item => `
         <tr>
           <td>${new Date(item.timestamp).toLocaleDateString()}</td>
-          <td>${item.reference_no}</td>
+          <td><strong>${item.billing_description || "Other Sales"}</strong></td>
           <td>${item.payer_vendor || "N/A"}</td>
           <td><span class="badge badge-info">${item.payment_method}</span></td>
-          <td>${item.billing_description || "Other Sales"}</td>
+          <td>${item.reference_no}</td>
           <td style="color:var(--accent-success)"><strong>GH¢ ${item.amount.toFixed(2)}</strong></td>
         </tr>
       `).join("") || `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">No other incomes recorded yet.</td></tr>`;
@@ -14581,10 +14589,10 @@ async function renderFinanceAccounts(container) {
       document.getElementById("exp-table-body").innerHTML = list.map(item => `
         <tr>
           <td>${new Date(item.timestamp).toLocaleDateString()}</td>
-          <td>${item.reference_no}</td>
+          <td><strong>${item.billing_description || "Operational Expense"}</strong></td>
           <td>${item.payer_vendor || "N/A"}</td>
           <td><span class="badge badge-info">${item.payment_method}</span></td>
-          <td>${item.billing_description || "Operational Expense"}</td>
+          <td>${item.reference_no}</td>
           <td style="color:var(--accent-danger)"><strong>GH¢ ${item.amount.toFixed(2)}</strong></td>
         </tr>
       `).join("") || `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">No other expenses recorded yet.</td></tr>`;
@@ -14698,6 +14706,57 @@ async function renderFinanceAccounts(container) {
       `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No bank reconciliations logged yet.</td></tr>`;
     }
 
+    // Dynamic text box handlers for "Other Income Sources" and "Other Operational Expenses"
+    const incCategorySelect = document.getElementById("inc-category");
+    const incCustomGroup = document.getElementById("inc-custom-type-group");
+    const incCustomInput = document.getElementById("inc-custom-type");
+
+    function updateIncCustomVisibility() {
+      if (!incCategorySelect || !incCustomGroup || !incCustomInput) return;
+      if (incCategorySelect.value === "Other Incomes") {
+        incCustomGroup.classList.remove("portal-hidden");
+        incCustomInput.required = true;
+      } else {
+        incCustomGroup.classList.add("portal-hidden");
+        incCustomInput.required = false;
+        incCustomInput.value = "";
+      }
+    }
+
+    if (incCategorySelect) {
+      incCategorySelect.addEventListener("change", () => {
+        updateIncCustomVisibility();
+        if (incCategorySelect.value === "Other Incomes" && incCustomInput) {
+          incCustomInput.focus();
+        }
+      });
+    }
+
+    const expCategorySelect = document.getElementById("exp-category");
+    const expCustomGroup = document.getElementById("exp-custom-type-group");
+    const expCustomInput = document.getElementById("exp-custom-type");
+
+    function updateExpCustomVisibility() {
+      if (!expCategorySelect || !expCustomGroup || !expCustomInput) return;
+      if (expCategorySelect.value === "Other Operational Expenses") {
+        expCustomGroup.classList.remove("portal-hidden");
+        expCustomInput.required = true;
+      } else {
+        expCustomGroup.classList.add("portal-hidden");
+        expCustomInput.required = false;
+        expCustomInput.value = "";
+      }
+    }
+
+    if (expCategorySelect) {
+      expCategorySelect.addEventListener("change", () => {
+        updateExpCustomVisibility();
+        if (expCategorySelect.value === "Other Operational Expenses" && expCustomInput) {
+          expCustomInput.focus();
+        }
+      });
+    }
+
     document.getElementById("form-add-income").onsubmit = async (e) => {
       e.preventDefault();
       const submitBtn = e.target.querySelector('button[type="submit"]');
@@ -14708,10 +14767,23 @@ async function renderFinanceAccounts(container) {
       }
 
       const category = document.getElementById("inc-category").value;
+      const customType = document.getElementById("inc-custom-type") ? document.getElementById("inc-custom-type").value.trim() : "";
       const amount = parseFloat(document.getElementById("inc-amount").value);
       const payer = document.getElementById("inc-payer").value;
       const method = document.getElementById("inc-method").value;
       const ref = document.getElementById("inc-ref").value;
+
+      if (category === "Other Incomes" && !customType) {
+        showToast("Please specify which type of income this is.", "warning");
+        if (incCustomInput) incCustomInput.focus();
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Inflow";
+        }
+        return;
+      }
+
+      const billingDesc = (category === "Other Incomes" && customType) ? `Other Incomes - ${customType}` : category;
 
       try {
         const txId = "t-income-" + Date.now();
@@ -14725,17 +14797,20 @@ async function renderFinanceAccounts(container) {
           recorded_by: currentUser.user_id,
           timestamp: new Date().toISOString(),
           payer_vendor: payer,
-          billing_description: category
+          category: category,
+          custom_type: customType || null,
+          billing_description: billingDesc
         });
         showToast("Other Income recorded successfully!", "success");
         document.getElementById("form-add-income").reset();
+        updateIncCustomVisibility();
         loadIncomes();
       } catch (err) {
         showToast("Error saving income transaction", "danger");
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Income";
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Inflow";
         }
       }
     };
@@ -14750,10 +14825,23 @@ async function renderFinanceAccounts(container) {
       }
 
       const category = document.getElementById("exp-category").value;
+      const customType = document.getElementById("exp-custom-type") ? document.getElementById("exp-custom-type").value.trim() : "";
       const amount = parseFloat(document.getElementById("exp-amount").value);
       const vendor = document.getElementById("exp-vendor").value;
       const method = document.getElementById("exp-method").value;
       const ref = document.getElementById("exp-ref").value;
+
+      if (category === "Other Operational Expenses" && !customType) {
+        showToast("Please specify which type of expense this is.", "warning");
+        if (expCustomInput) expCustomInput.focus();
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Outflow";
+        }
+        return;
+      }
+
+      const billingDesc = (category === "Other Operational Expenses" && customType) ? `Other Operational Expenses - ${customType}` : category;
 
       try {
         const txId = "t-expense-" + Date.now();
@@ -14767,17 +14855,20 @@ async function renderFinanceAccounts(container) {
           recorded_by: currentUser.user_id,
           timestamp: new Date().toISOString(),
           payer_vendor: vendor,
-          billing_description: category
+          category: category,
+          custom_type: customType || null,
+          billing_description: billingDesc
         });
         showToast("Other Expense recorded successfully!", "success");
         document.getElementById("form-add-expense").reset();
+        updateExpCustomVisibility();
         loadExpenses();
       } catch (err) {
         showToast("Error saving expense transaction", "danger");
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Expense";
+          submitBtn.innerHTML = submitBtn.dataset.origText || "Record Outflow";
         }
       }
     };
