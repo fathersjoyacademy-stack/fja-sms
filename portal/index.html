@@ -132,9 +132,6 @@
         <span id="offline-badge" class="badge badge-warning portal-hidden">Offline</span>
       </div>
       <div style="display:flex; align-items:center; gap:0.6rem; flex-shrink:0;">
-        <button id="btn-sync-modal" class="btn btn-secondary" style="min-height:34px; padding:0 0.65rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.35rem;" title="Device Sync & Cloud Status">
-          <span id="sync-icon-symbol">☁</span> <span class="sync-btn-label">Sync</span>
-        </button>
         <button id="btn-theme-toggle-portal" class="btn-icon" title="Toggle Theme" aria-label="Toggle Theme">🌓</button>
         <button id="btn-notifications-toggle" class="btn-icon" style="position:relative;" title="Notifications" aria-label="Notifications">
           🔔<span id="notification-badge" class="badge badge-danger" style="position:absolute; top:-4px; right:-4px; padding:2px 5px; font-size:0.65rem; border-radius:50%; display:none; justify-content:center; align-items:center; min-height:16px; min-width:16px;">0</span>
@@ -352,60 +349,6 @@
           <button type="button" id="btn-close-personal-profile-modal" class="btn btn-secondary" style="flex:1; min-height:38px;">Close Profile</button>
         </div>
       </form>
-    </div>
-  </div>
-
-  <!-- Cross-Device Sync & Data Transfer Center Modal -->
-  <div id="sync-transfer-modal" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:2600; padding:1.5rem 1rem; overflow-y:auto;">
-    <div class="admissions-box" style="width:100%; max-width:540px; padding:1.75rem; margin:0 auto; max-height:calc(100vh - 4rem); overflow-y:auto; position:relative; background:var(--bg-secondary); border:1px solid var(--border-color); color:var(--text-primary); border-radius:14px; box-shadow:var(--shadow-lg);">
-      <button id="btn-close-sync-modal" class="btn-icon" style="position:absolute; top:1rem; right:1rem; cursor:pointer;" aria-label="Close">✕</button>
-      <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-        <span style="font-size:1.4rem;">🔄</span>
-        <h3 style="margin:0; font-family:var(--font-family-display);">Device Data Sync & Parity</h3>
-      </div>
-      <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1rem;">Ensure 100% data uniformity between mobile view and desktop view across all user portals.</p>
-
-      <!-- Cloud Status Box -->
-      <div id="sync-cloud-status-box" style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:10px; padding:0.85rem 1rem; margin-bottom:1.25rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-          <span style="font-weight:600; font-size:0.85rem;">Cloud Status:</span>
-          <span id="sync-modal-status-pill" class="badge badge-info">Checking cloud status...</span>
-        </div>
-        <p id="sync-modal-status-desc" style="font-size:0.8rem; color:var(--text-secondary); margin:0.4rem 0 0 0;">Connecting to central synchronization engine...</p>
-      </div>
-
-      <!-- Action 1: Instant Sync Code Transfer -->
-      <div class="card" style="margin-bottom:1rem; padding:1rem; background:var(--bg-primary);">
-        <h4 style="margin:0 0 0.5rem 0; font-size:0.95rem; color:var(--accent-primary);">1. Quick Device-to-Device Code</h4>
-        <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.75rem;">Copy this device's data code and paste on your other device (mobile/desktop) for instantaneous 100% sync.</p>
-        <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-          <button type="button" id="btn-copy-sync-code" class="btn btn-primary" style="flex:1; min-height:36px; font-size:0.8rem;">📋 Copy Sync Code from this Device</button>
-          <button type="button" id="btn-show-paste-code" class="btn btn-secondary" style="flex:1; min-height:36px; font-size:0.8rem;">📥 Apply Code from Other Device</button>
-        </div>
-        <div id="sync-code-paste-area" class="portal-hidden" style="margin-top:0.75rem;">
-          <textarea id="sync-paste-textarea" class="form-control" rows="3" placeholder="Paste data sync code from other device here..." style="font-size:0.8rem; font-family:monospace; resize:vertical;"></textarea>
-          <button type="button" id="btn-apply-sync-code" class="btn btn-success" style="width:100%; margin-top:0.5rem; min-height:36px; font-size:0.85rem;">✓ Apply Sync Code & Reload Portals</button>
-        </div>
-      </div>
-
-      <!-- Action 2: File-Based Full Database Backup & Restore -->
-      <div class="card" style="margin-bottom:1rem; padding:1rem; background:var(--bg-primary);">
-        <h4 style="margin:0 0 0.5rem 0; font-size:0.95rem; color:var(--accent-primary);">2. Complete Database Backup File (.json)</h4>
-        <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.75rem;">Download a full verified snapshot of your database or upload one from another device.</p>
-        <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-          <button type="button" id="btn-export-db-file" class="btn btn-secondary" style="flex:1; min-height:36px; font-size:0.8rem;">💾 Download Full Backup</button>
-          <label class="btn btn-secondary" style="flex:1; min-height:36px; font-size:0.8rem; display:flex; align-items:center; justify-content:center; cursor:pointer; margin:0;">
-            📂 Restore Backup File
-            <input type="file" id="input-import-db-file" accept=".json,application/json" style="display:none;">
-          </label>
-        </div>
-      </div>
-
-      <!-- Action 3: Cloud Resync -->
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; pt:0.5rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
-        <button type="button" id="btn-force-cloud-resync" class="btn btn-secondary" style="font-size:0.8rem; min-height:34px;">🔄 Force Cloud Resync</button>
-        <button type="button" id="btn-close-sync-modal-bottom" class="btn btn-primary" style="font-size:0.8rem; min-height:34px; padding:0 1.25rem;">Done</button>
-      </div>
     </div>
   </div>
 

@@ -2011,10 +2011,5 @@ input[type="button"]:disabled,
   }
 }
 
-@media (max-width: 420px) {
-  .sync-btn-label {
-    display: none !important;
-  }
-}
 
 
