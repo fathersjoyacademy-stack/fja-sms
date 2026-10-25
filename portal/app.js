@@ -868,6 +868,8 @@ async function handlePortalLogin(e) {
     if (result.success) {
       currentToken = result.token;
       currentUser = result.user;
+      window.currentUser = result.user;
+      if (window.api) window.api.currentUser = result.user;
       
       // Persist session to survive browser reloads & prevent auto-logout
       localStorage.setItem("fja_session_token", result.token);
@@ -948,6 +950,8 @@ async function handleForcedReset(e) {
 
 async function enterDashboardPortal() {
   if (!currentUser) return;
+  window.currentUser = currentUser;
+  if (window.api) window.api.currentUser = currentUser;
   
   // Start syncing private collections now that we are authenticated
   if (window.startFirestoreSync && window.STORES_TO_SYNC) {
@@ -1397,22 +1401,49 @@ async function renderProprietorFinanceOverview(container) {
 
 async function renderProprietorCashflowTab(container) {
   try {
-    const transactions = await window.db.getAll("financial_transactions");
-    const summary = window.api.getFinancialMetrics(transactions, "all");
+    const users = await window.db.getAll("users") || [];
+    const students = users.filter(u => u.role === "Student" && u.status === "ACTIVE");
+    const transactions = await window.db.getAll("financial_transactions") || [];
+    const summary = window.api.getFinancialMetrics(transactions, "all", students);
+
+    window._refreshPropFinanceOverview = () => renderProprietorCashflowTab(container);
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
+        <div class="grid-4">
+          <div class="card" style="border-left:4px solid var(--accent-primary);">
+            <div style="font-size:0.85rem; color:var(--text-secondary);">Gross Cash Inflows</div>
+            <div style="font-size:1.8rem; font-weight:800; margin-top:0.35rem; color:var(--accent-success);">GH¢ ${summary.grossInflows.toFixed(2)}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Total cash collected</div>
+          </div>
+          <div class="card" style="border-left:4px solid var(--accent-secondary);">
+            <div style="font-size:0.85rem; color:var(--text-secondary);">Tuition Fees Collected</div>
+            <div style="font-size:1.8rem; font-weight:800; margin-top:0.35rem; color:var(--accent-primary);">GH¢ ${summary.feesCollected.toFixed(2)}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Tuition fee receipts</div>
+          </div>
+          <div class="card" style="border-left:4px solid ${summary.totalArrears > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">
+            <div style="font-size:0.85rem; color:var(--text-secondary);">Outstanding Student Arrears</div>
+            <div style="font-size:1.8rem; font-weight:800; margin-top:0.35rem; color:${summary.totalArrears > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">GH¢ ${summary.totalArrears.toFixed(2)}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Unpaid student balances</div>
+          </div>
+          <div class="card" style="border-left:4px solid var(--accent-success);">
+            <div style="font-size:0.85rem; color:var(--text-secondary);">Net Operating Cash Balance</div>
+            <div style="font-size:1.8rem; font-weight:800; margin-top:0.35rem; color:var(--accent-success);">GH¢ ${summary.netCash.toFixed(2)}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Inflows minus all outflows</div>
+          </div>
+        </div>
+
         <div class="grid-2">
           <div class="card">
             <h3>Visual Financial Cash Flow Overview</h3>
             <div style="position:relative; margin-top:1rem; height:220px;">
-              <canvas id="finance-dash-flow-canvas"></canvas>
+              <canvas id="prop-fin-flow-canvas"></canvas>
             </div>
           </div>
           <div class="card">
             <h3>Fee Collections vs Arrears Status</h3>
             <div style="position:relative; margin-top:1rem; height:220px;">
-              <canvas id="finance-dash-fees-canvas"></canvas>
+              <canvas id="prop-fin-fees-canvas"></canvas>
             </div>
           </div>
         </div>
@@ -1420,7 +1451,7 @@ async function renderProprietorCashflowTab(container) {
     `;
 
     setTimeout(() => {
-      const flowCtx = document.getElementById("finance-dash-flow-canvas");
+      const flowCtx = document.getElementById("prop-fin-flow-canvas");
       if (flowCtx) {
         new Chart(flowCtx, {
           type: "bar",
@@ -1442,7 +1473,7 @@ async function renderProprietorCashflowTab(container) {
         });
       }
 
-      const feesCtx = document.getElementById("finance-dash-fees-canvas");
+      const feesCtx = document.getElementById("prop-fin-fees-canvas");
       if (feesCtx) {
         new Chart(feesCtx, {
           type: "doughnut",
@@ -2358,6 +2389,8 @@ async function renderFinanceDash(container) {
     const students = users.filter(u => u.role === "Student" && u.status === "ACTIVE");
     const staff = users.filter(u => u.role !== "Student" && u.role !== "Parent" && u.status === "ACTIVE");
     const transactions = await window.db.getAll("financial_transactions");
+
+    window._refreshFinanceDash = () => renderFinanceDash(container);
 
     // Centralized institutional financial calculations
     const summary = window.api.getFinancialMetrics(transactions, "all", students);
@@ -14420,12 +14453,23 @@ async function renderFinanceAccounts(container) {
           <p style="color:var(--text-secondary);">Record other school incomes/expenses, manage payables & receivables, and log monthly bank reconciliations</p>
         </div>
 
+        <div class="mobile-only-block" style="margin-bottom:0.5rem;">
+          <label class="form-label" style="font-weight:600; font-size:0.85rem; margin-bottom:0.35rem;">Select Active Ledger Section:</label>
+          <select id="fa-mobile-header-select" class="form-control" style="min-height:42px; font-weight:600; font-size:0.9rem;">
+            <option value="income" selected>Other Incomes</option>
+            <option value="expense">Other Expenses</option>
+            <option value="receivable">Receivables</option>
+            <option value="payable">Payables</option>
+            <option value="recon">Bank Reconciliation</option>
+          </select>
+        </div>
+
         <div class="fa-subtab-bar">
-          <button id="btn-fa-tab-income" class="btn btn-primary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem;">Other Incomes</button>
-          <button id="btn-fa-tab-expense" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem;">Other Expenses</button>
-          <button id="btn-fa-tab-receivable" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem;">Receivables</button>
-          <button id="btn-fa-tab-payable" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem;">Payables</button>
-          <button id="btn-fa-tab-recon" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem;">Bank Recon</button>
+          <button id="btn-fa-tab-income" class="btn btn-primary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem; flex-shrink:0;">Other Incomes</button>
+          <button id="btn-fa-tab-expense" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem; flex-shrink:0;">Other Expenses</button>
+          <button id="btn-fa-tab-receivable" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem; flex-shrink:0;">Receivables</button>
+          <button id="btn-fa-tab-payable" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem; flex-shrink:0;">Payables</button>
+          <button id="btn-fa-tab-recon" class="btn btn-secondary" style="min-height:35px; padding:0 0.8rem; font-size:0.8rem; flex-shrink:0;">Bank Recon</button>
         </div>
 
         <!-- TAB 1: OTHER INCOME -->
@@ -14741,6 +14785,8 @@ async function renderFinanceAccounts(container) {
     const payContent = document.getElementById("fa-tab-payable-content");
     const reconContent = document.getElementById("fa-tab-recon-content");
 
+    const mobHeaderSelect = document.getElementById("fa-mobile-header-select");
+
     function hideAllTabs() {
       incContent.classList.add("portal-hidden");
       expContent.classList.add("portal-hidden");
@@ -14755,11 +14801,45 @@ async function renderFinanceAccounts(container) {
       tabReconBtn.className = "btn btn-secondary";
     }
 
-    tabIncBtn.onclick = () => { hideAllTabs(); tabIncBtn.className = "btn btn-primary"; incContent.classList.remove("portal-hidden"); loadIncomes(); };
-    tabExpBtn.onclick = () => { hideAllTabs(); tabExpBtn.className = "btn btn-primary"; expContent.classList.remove("portal-hidden"); loadExpenses(); };
-    tabRecBtn.onclick = () => { hideAllTabs(); tabRecBtn.className = "btn btn-primary"; recContent.classList.remove("portal-hidden"); loadReceivables(); };
-    tabPayBtn.onclick = () => { hideAllTabs(); tabPayBtn.className = "btn btn-primary"; payContent.classList.remove("portal-hidden"); loadPayables(); };
-    tabReconBtn.onclick = () => { hideAllTabs(); tabReconBtn.className = "btn btn-primary"; reconContent.classList.remove("portal-hidden"); loadRecons(); };
+    function selectTab(tabKey) {
+      hideAllTabs();
+      if (tabKey === "income") {
+        tabIncBtn.className = "btn btn-primary";
+        incContent.classList.remove("portal-hidden");
+        loadIncomes();
+      } else if (tabKey === "expense") {
+        tabExpBtn.className = "btn btn-primary";
+        expContent.classList.remove("portal-hidden");
+        loadExpenses();
+      } else if (tabKey === "receivable") {
+        tabRecBtn.className = "btn btn-primary";
+        recContent.classList.remove("portal-hidden");
+        loadReceivables();
+      } else if (tabKey === "payable") {
+        tabPayBtn.className = "btn btn-primary";
+        payContent.classList.remove("portal-hidden");
+        loadPayables();
+      } else if (tabKey === "recon") {
+        tabReconBtn.className = "btn btn-primary";
+        reconContent.classList.remove("portal-hidden");
+        loadRecons();
+      }
+      if (mobHeaderSelect && mobHeaderSelect.value !== tabKey) {
+        mobHeaderSelect.value = tabKey;
+      }
+    }
+
+    tabIncBtn.onclick = () => selectTab("income");
+    tabExpBtn.onclick = () => selectTab("expense");
+    tabRecBtn.onclick = () => selectTab("receivable");
+    tabPayBtn.onclick = () => selectTab("payable");
+    tabReconBtn.onclick = () => selectTab("recon");
+
+    if (mobHeaderSelect) {
+      mobHeaderSelect.addEventListener("change", (e) => {
+        selectTab(e.target.value);
+      });
+    }
 
     async function refreshFinanceAccountsMetrics() {
       try {
@@ -18874,6 +18954,12 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (typeof window._refreshFinanceAccounts === "function") {
         debouncedSyncRefresh("financeAccounts", window._refreshFinanceAccounts, 300);
       }
+      if (typeof window._refreshFinanceDash === "function") {
+        debouncedSyncRefresh("financeDash", window._refreshFinanceDash, 300);
+      }
+      if (typeof window._refreshPropFinanceOverview === "function") {
+        debouncedSyncRefresh("propFinOverview", window._refreshPropFinanceOverview, 300);
+      }
       if ([
         "proprietor-finance-overview",
         "finance-dash",
@@ -21930,6 +22016,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           const freshUser = await window.db.get("users", claims.user_id);
           if (freshUser && freshUser.status === "ACTIVE") {
             currentUser = freshUser;
+            window.currentUser = freshUser;
             currentToken = savedToken;
             window.api.setCurrentUser(freshUser);
             await enterDashboardPortal();

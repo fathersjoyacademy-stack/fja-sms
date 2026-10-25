@@ -271,6 +271,9 @@ const api = {
 
   setCurrentUser(user) {
     this.currentUser = user;
+    if (typeof window !== "undefined") {
+      window.currentUser = user;
+    }
   },
 
   // --- Password Hashing & Checks (SHA-256 Web Crypto) ---

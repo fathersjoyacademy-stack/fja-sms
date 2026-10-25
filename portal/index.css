@@ -1472,7 +1472,7 @@ input[type="button"]:disabled,
 }
 
 @media (max-width: 768px) {
-  .fa-tab-grid, .prospectus-layout-grid {
+  .fa-tab-grid:not(.portal-hidden), .prospectus-layout-grid:not(.portal-hidden) {
     display: flex !important;
     flex-direction: column !important;
     gap: 1.25rem !important;
@@ -1989,4 +1989,22 @@ input[type="button"]:disabled,
   align-items: center;
   gap: 0.4rem;
 }
+
+/* Universal portal-hidden enforcement across all breakpoints */
+.portal-hidden,
+[class*="portal-hidden"] {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+.mobile-only-block {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-only-block {
+    display: block !important;
+  }
+}
+
 

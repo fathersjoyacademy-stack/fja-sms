@@ -1990,9 +1990,38 @@ function clearAllFirestoreListeners() {
   }
 }
 
+// Helper to safely retrieve current authenticated user from window, API, or localStorage
+function getActiveAuthUser() {
+  if (window.currentUser && window.currentUser.user_id) return window.currentUser;
+  if (window.api && typeof window.api.getCurrentUser === "function") {
+    const apiUser = window.api.getCurrentUser();
+    if (apiUser && apiUser.user_id) {
+      window.currentUser = apiUser;
+      return apiUser;
+    }
+  }
+  if (typeof localStorage !== "undefined") {
+    try {
+      const raw = localStorage.getItem("fja_session_user");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.user_id) {
+          window.currentUser = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
 // Role-based store pruning to avoid syncing unneeded collections on free tier
 function getStoresForUserRole(role) {
   if (!role) {
+    if (!DB_READ_ONLY) {
+      // In authenticated portal context, always include financial_transactions and core operational stores
+      return STORES_TO_SYNC;
+    }
     return [
       "users", "profiles", "classes", "enrolments", "subjects",
       "parent_profiles", "parent_student_relations",
@@ -2131,7 +2160,8 @@ async function startFirestoreSync(specificStores = null) {
     wipeAllStudentFeeEntries().catch(() => {});
 
     // Role-based store pruning to prevent exhausting free-tier read limits
-    const currentRole = (window.currentUser && window.currentUser.role) || (typeof currentUser !== "undefined" && currentUser ? currentUser.role : null);
+    const authUser = getActiveAuthUser();
+    const currentRole = authUser ? authUser.role : null;
     const roleAllowed = getStoresForUserRole(currentRole);
     const storesToFilter = specificStores || STORES_TO_SYNC;
     const storesToProcess = storesToFilter.filter(s => roleAllowed.includes(s));
@@ -2256,9 +2286,10 @@ async function startFirestoreSync(specificStores = null) {
       // NOTE: We DO NOT run initialQuery.get() beforehand because onSnapshot already delivers initial documents!
       if (isRealtime) {
         let baseQueries = [];
-        if (window.currentUser) {
-          const role = window.currentUser.role;
-          const myId = window.currentUser.user_id;
+        const authUser = getActiveAuthUser();
+        if (authUser) {
+          const role = authUser.role;
+          const myId = authUser.user_id;
           
           if (role === "Student") {
             if (["student_scores", "financial_transactions", "enrolments"].includes(storeName)) {
@@ -2465,7 +2496,7 @@ if (typeof window !== "undefined") {
 
   // Background Heartbeat: runs every 60s while active to sync dirty offline records
   setInterval(() => {
-    if (document.visibilityState === "visible" && navigator.onLine && window.currentUser) {
+    if (document.visibilityState === "visible" && navigator.onLine && getActiveAuthUser()) {
       triggerFastSafetySync();
     }
   }, 60000);
