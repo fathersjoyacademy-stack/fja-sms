@@ -1992,23 +1992,24 @@ function clearAllFirestoreListeners() {
 function getStoresForUserRole(role) {
   if (!role) {
     return [
-      "users", "profiles", "parent_profiles", "parent_student_relations",
+      "users", "profiles", "classes", "enrolments", "subjects",
+      "parent_profiles", "parent_student_relations",
       "cms_content", "academic_calendar", "gallery_albums", "gallery_images"
     ];
   }
   if (role === "Student") {
     return [
-      "users", "profiles", "classes", "assignments", "student_scores",
+      "users", "profiles", "classes", "enrolments", "assignments", "student_scores",
       "attendance", "notifications", "portal_messages", "notification_user_reads",
-      "cms_content", "academic_calendar", "elibrary_books"
+      "subjects", "cms_content", "academic_calendar", "elibrary_books"
     ];
   }
   if (role === "Parent") {
     return [
       "users", "profiles", "parent_profiles", "parent_student_relations",
-      "classes", "student_scores", "attendance", "financial_transactions",
+      "classes", "enrolments", "student_scores", "attendance", "financial_transactions",
       "notifications", "portal_messages", "notification_user_reads",
-      "cms_content", "academic_calendar"
+      "subjects", "cms_content", "academic_calendar"
     ];
   }
   if (role === "Teacher" || role === "SectionalHead") {
@@ -2303,9 +2304,23 @@ async function startFirestoreSync(specificStores = null) {
           baseQueries.push(firestore.collection(storeName));
         }
 
+        // Core relational & catalog stores must NEVER be delta-filtered by timestamp or truncated by limits
+        const NON_DELTA_STORES = [
+          "classes",
+          "enrolments",
+          "users",
+          "profiles",
+          "parent_profiles",
+          "parent_student_relations",
+          "academic_calendar",
+          "subjects",
+          "cms_content",
+          "prospectuses"
+        ];
+
         // Apply Delta filter to onSnapshot queries to avoid reading the whole collection on connect
         const queries = baseQueries.map(q => {
-          if (storeName === "academic_calendar" || storeName === "users" || storeName === "profiles") return q;
+          if (NON_DELTA_STORES.includes(storeName)) return q;
           if (lastSync) {
             const safetyBufferMs = 15 * 60 * 1000;
             const lastSyncMs = new Date(lastSync).getTime();
@@ -2315,7 +2330,7 @@ async function startFirestoreSync(specificStores = null) {
             return q.where("updated_at", ">", bufferedSyncTime);
           } else {
             // Unsynced device initial connect: bound query size
-            return q.limit(150);
+            return q.limit(300);
           }
         });
 

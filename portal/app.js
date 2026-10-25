@@ -118,7 +118,7 @@ function getStaffSection(user, profile, classes) {
   if (!user) return "N/A";
   if (user.role === "Teacher" || user.role === "SectionalHead") {
     if (classes && classes.length > 0) {
-      const assignedClass = classes.find(c => c.class_teacher_id === user.user_id);
+      const assignedClass = classes.find(c => (user.user_id && c.class_teacher_id === user.user_id) || (user.uid && c.class_teacher_id === user.uid));
       if (assignedClass) {
         return getSectionFromClassName(assignedClass.class_name);
       }
@@ -133,6 +133,53 @@ function getStaffSection(user, profile, classes) {
   }
   return "Administration";
 }
+
+// Centralized Student Class Assignment Resolver (with multi-layer fallback to profile)
+function getStudentClassInfo(student, enrolments, classes, profiles) {
+  if (!student) return { class_id: "", class_name: "Unassigned" };
+  const sId = student.user_id;
+  const sUid = student.uid;
+  
+  // 1. Primary: Match from enrolments (by student_id matching user_id or uid)
+  if (Array.isArray(enrolments) && enrolments.length > 0) {
+    const en = enrolments.find(e => (sId && e.student_id === sId) || (sUid && e.student_id === sUid));
+    if (en && en.class_id) {
+      if (Array.isArray(classes)) {
+        const cl = classes.find(c => c.class_id === en.class_id);
+        if (cl) return { class_id: cl.class_id, class_name: cl.class_name, is_enrolled: true };
+      }
+      return { class_id: en.class_id, class_name: en.class_name || en.class_id, is_enrolled: true };
+    }
+  }
+
+  // 2. Secondary fallback: Match from student profile (current_class_id or current_class_name)
+  if (Array.isArray(profiles) && profiles.length > 0) {
+    const prof = profiles.find(p => (sId && p.user_id === sId) || (sUid && p.uid === sUid));
+    if (prof) {
+      if (prof.current_class_id) {
+        if (Array.isArray(classes)) {
+          const cl = classes.find(c => c.class_id === prof.current_class_id);
+          if (cl) return { class_id: cl.class_id, class_name: cl.class_name, from_profile: true };
+        }
+      }
+      if (prof.current_class_name) {
+        return { class_id: prof.current_class_id || "", class_name: prof.current_class_name, from_profile: true };
+      }
+    }
+  }
+
+  return { class_id: "", class_name: "Unassigned" };
+}
+window.getStudentClassInfo = getStudentClassInfo;
+
+// Centralized Teacher Assigned Classes Resolver
+function getTeacherClasses(teacher, classes) {
+  if (!teacher || !Array.isArray(classes)) return [];
+  const tId = teacher.user_id;
+  const tUid = teacher.uid;
+  return classes.filter(c => (tId && c.class_teacher_id === tId) || (tUid && c.class_teacher_id === tUid));
+}
+window.getTeacherClasses = getTeacherClasses;
 
 // --------------------------------------------------
 // CLIENT-SIDE IMAGE RESIZING & COMPRESSION UTILITY
@@ -6952,31 +6999,28 @@ async function renderFeeLedger(container) {
         const matchesSearch = !searchVal || fullName.includes(searchVal) || (s.uid && s.uid.toLowerCase().includes(searchVal));
         if (!matchesSearch) return false;
 
+        const sClass = getStudentClassInfo(s, enrolmentList, classes, profiles);
         if (selectedClass === "unassigned") {
-          const enroll = enrolmentList.find(e => e.student_id === s.user_id && e.class_id);
-          if (enroll) return false;
+          if (sClass.class_id) return false;
         } else if (selectedClass) {
-          const enroll = enrolmentList.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
-          if (!enroll) return false;
+          if (sClass.class_id !== selectedClass) return false;
         }
         return true;
       });
 
       // Sort students (Default is class-asc: Creche → JHS)
       filtered.sort((a, b) => {
-        const enrollA = enrolments.find(e => e.student_id === a.user_id) || {};
-        const enrollB = enrolments.find(e => e.student_id === b.user_id) || {};
-        const clsA = classes.find(c => c.class_id === enrollA.class_id);
-        const clsB = classes.find(c => c.class_id === enrollB.class_id);
+        const classA = getStudentClassInfo(a, enrolments, classes, profiles);
+        const classB = getStudentClassInfo(b, enrolments, classes, profiles);
 
         if (currentSort === "class-asc") {
-          const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
-          const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
+          const rankA = getEduClassRank(classA.class_name);
+          const rankB = getEduClassRank(classB.class_name);
           if (rankA !== rankB) return rankA - rankB;
           return formatFullName(a).localeCompare(formatFullName(b));
         } else if (currentSort === "class-desc") {
-          const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
-          const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
+          const rankA = getEduClassRank(classA.class_name);
+          const rankB = getEduClassRank(classB.class_name);
           if (rankA === -1 && rankB !== -1) return 1;
           if (rankB === -1 && rankA !== -1) return -1;
           if (rankA !== rankB) return rankB - rankA;
@@ -7011,9 +7055,10 @@ async function renderFeeLedger(container) {
         const charged = sFin.totalCharged;
         const paid = sFin.totalPaid;
         const arrears = sFin.netArrears;
-        const enroll = enrolments.find(e => e.student_id === s.user_id) || {};
-        const cls = classes.find(c => c.class_id === enroll.class_id);
-        const classNameBadge = cls ? `<span class="badge badge-info" style="font-weight:600;">${cls.class_name}</span>` : `<span style="color:var(--text-muted); font-size:0.85rem;">Unassigned</span>`;
+        const classInfo = getStudentClassInfo(s, enrolments, classes, profiles);
+        const classNameBadge = classInfo.class_name !== "Unassigned" 
+          ? `<span class="badge badge-info" style="font-weight:600;">${classInfo.class_name}</span>` 
+          : `<span style="color:var(--text-muted); font-size:0.85rem;">Unassigned</span>`;
 
         return `
           <tr>
@@ -7488,9 +7533,9 @@ async function renderFeeLedger(container) {
       document.getElementById("state-stud-uid").innerText = studentUid;
       document.getElementById("state-statement-date").innerText = statementDateStr;
       
-      const enroll = enrolments.find(e => e.student_id === studentId) || {};
-      const cls = classes.find(c => c.class_id === enroll.class_id);
-      const className = cls ? cls.class_name : "Primary 5";
+      const targetStudent = (users || []).find(u => u.user_id === studentId || u.uid === studentUid);
+      const classInfo = getStudentClassInfo(targetStudent, enrolments, classes, profiles);
+      const className = classInfo.class_name !== "Unassigned" ? classInfo.class_name : "General Class";
       document.getElementById("state-stud-class").innerText = className;
 
       const txs = await window.db.getAll("financial_transactions");
@@ -15419,31 +15464,28 @@ async function renderRecordsManagement(container) {
           if (!matchSearch) return false;
           if (statusFilter !== "ALL" && s.status !== statusFilter) return false;
 
+          const sClass = getStudentClassInfo(s, enrolments, classes, profiles);
           if (selectedClass === "unassigned") {
-            const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id);
-            if (enroll) return false;
+            if (sClass.class_id) return false;
           } else if (selectedClass) {
-            const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
-            if (!enroll) return false;
+            if (sClass.class_id !== selectedClass) return false;
           }
           return true;
         });
 
         // Apply current active sort
         filtered.sort((a, b) => {
-          const enrollA = enrolments.find(e => e.student_id === a.user_id) || {};
-          const enrollB = enrolments.find(e => e.student_id === b.user_id) || {};
-          const clsA = classes.find(c => c.class_id === enrollA.class_id);
-          const clsB = classes.find(c => c.class_id === enrollB.class_id);
+          const classA = getStudentClassInfo(a, enrolments, classes, profiles);
+          const classB = getStudentClassInfo(b, enrolments, classes, profiles);
 
           if (currentSort === "class-asc") {
-            const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
-            const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
+            const rankA = getEduClassRank(classA.class_name);
+            const rankB = getEduClassRank(classB.class_name);
             if (rankA !== rankB) return rankA - rankB;
             return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "class-desc") {
-            const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
-            const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
+            const rankA = getEduClassRank(classA.class_name);
+            const rankB = getEduClassRank(classB.class_name);
             if (rankA === -1 && rankB !== -1) return 1;
             if (rankB === -1 && rankA !== -1) return -1;
             if (rankA !== rankB) return rankB - rankA;
@@ -15482,9 +15524,8 @@ async function renderRecordsManagement(container) {
 
         rows = filtered.map(s => {
           const prof = profiles.find(p => p.user_id === s.user_id) || {};
-          const enroll = enrolments.find(e => e.student_id === s.user_id) || {};
-          const cls = classes.find(c => c.class_id === enroll.class_id);
-          const className = cls ? cls.class_name : "Unassigned";
+          const classInfo = getStudentClassInfo(s, enrolments, classes, profiles);
+          const className = classInfo.class_name;
           const cummAtt = prof.cummulative_attendance ? (String(prof.cummulative_attendance).includes("%") ? prof.cummulative_attendance : prof.cummulative_attendance + "%") : "N/A";
           const cummAcad = prof.cummulative_academic_score ? (String(prof.cummulative_academic_score).includes("%") ? prof.cummulative_academic_score : prof.cummulative_academic_score + "%") : "N/A";
 
@@ -15681,31 +15722,28 @@ async function renderRecordsManagement(container) {
             if (s.status !== statusFilter) return false;
           }
 
+          const sClass = getStudentClassInfo(s, enrolments, classes, profiles);
           if (selectedClass === "unassigned") {
-            const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id);
-            if (enroll) return false;
+            if (sClass.class_id) return false;
           } else if (selectedClass) {
-            const enroll = enrolments.find(e => e.student_id === s.user_id && e.class_id === selectedClass);
-            if (!enroll) return false;
+            if (sClass.class_id !== selectedClass) return false;
           }
           return true;
         });
 
         // Sort students according to selected order
         filtered.sort((a, b) => {
-          const enrollA = enrolments.find(e => e.student_id === a.user_id) || {};
-          const enrollB = enrolments.find(e => e.student_id === b.user_id) || {};
-          const clsA = classes.find(c => c.class_id === enrollA.class_id);
-          const clsB = classes.find(c => c.class_id === enrollB.class_id);
+          const classA = getStudentClassInfo(a, enrolments, classes, profiles);
+          const classB = getStudentClassInfo(b, enrolments, classes, profiles);
 
           if (currentSort === "class-asc") {
-            const rankA = clsA ? getEduClassRank(clsA.class_name) : 999;
-            const rankB = clsB ? getEduClassRank(clsB.class_name) : 999;
+            const rankA = getEduClassRank(classA.class_name);
+            const rankB = getEduClassRank(classB.class_name);
             if (rankA !== rankB) return rankA - rankB;
             return formatFullName(a).localeCompare(formatFullName(b));
           } else if (currentSort === "class-desc") {
-            const rankA = clsA ? getEduClassRank(clsA.class_name) : -1;
-            const rankB = clsB ? getEduClassRank(clsB.class_name) : -1;
+            const rankA = getEduClassRank(classA.class_name);
+            const rankB = getEduClassRank(classB.class_name);
             if (rankA === -1 && rankB !== -1) return 1;
             if (rankB === -1 && rankA !== -1) return -1;
             if (rankA !== rankB) return rankB - rankA;
@@ -15723,9 +15761,10 @@ async function renderRecordsManagement(container) {
         const paged = paginateArray(filtered, recPage, recPageSize);
 
         tableRows.innerHTML = paged.items.map(s => {
-          const enroll = enrolments.find(e => e.student_id === s.user_id) || {};
-          const cls = classes.find(c => c.class_id === enroll.class_id);
-          const className = cls ? `<span class="badge badge-primary" style="font-weight:600;">${cls.class_name}</span>` : '<span style="color:var(--text-muted)">Unassigned</span>';
+          const classInfo = getStudentClassInfo(s, enrolments, classes, profiles);
+          const className = classInfo.class_name !== "Unassigned" 
+            ? `<span class="badge badge-primary" style="font-weight:600;">${classInfo.class_name}</span>` 
+            : '<span style="color:var(--text-muted)">Unassigned</span>';
           const statClass = s.status === 'ACTIVE' ? 'success' : (s.status === 'ARCHIVED' ? 'danger' : 'secondary');
 
           const prof = profiles.find(p => p.user_id === s.user_id) || {};
@@ -15807,7 +15846,7 @@ async function renderRecordsManagement(container) {
             if (s.status !== statusFilter) return false;
           }
 
-          const tClasses = classes.filter(c => c.class_teacher_id === s.user_id);
+          const tClasses = getTeacherClasses(s, classes);
           const isTeacher = s.role === "Teacher" || s.role === "SectionalHead";
 
           if (selectedClass === "unassigned") {
@@ -15829,8 +15868,8 @@ async function renderRecordsManagement(container) {
 
         // Sort staff according to selected order
         filtered.sort((a, b) => {
-          const tClassesA = classes.filter(c => c.class_teacher_id === a.user_id);
-          const tClassesB = classes.filter(c => c.class_teacher_id === b.user_id);
+          const tClassesA = getTeacherClasses(a, classes);
+          const tClassesB = getTeacherClasses(b, classes);
           const clsA = tClassesA[0];
           const clsB = tClassesB[0];
 
@@ -15861,7 +15900,7 @@ async function renderRecordsManagement(container) {
         tableRows.innerHTML = paged.items.map(s => {
           const prof = profiles.find(p => p.user_id === s.user_id) || {};
           const section = getStaffSection(s, prof, classes);
-          const tClasses = classes.filter(c => c.class_teacher_id === s.user_id);
+          const tClasses = getTeacherClasses(s, classes);
           const classBadge = tClasses.length > 0 
             ? `<span class="badge badge-primary" style="font-weight:600;">${tClasses.map(c => c.class_name).join(", ")}</span>`
             : `<span style="color:var(--text-secondary); font-size:0.85rem;">${section}</span>`;
@@ -16207,9 +16246,8 @@ async function renderRecordsManagement(container) {
 
       let contactFields = "";
       if (u.role === "Student") {
-        const enroll = enrolments.find(e => e.student_id === userId) || {};
-        const cls = classes.find(c => c.class_id === enroll.class_id);
-        const className = cls ? cls.class_name : "Unassigned";
+        const classInfo = getStudentClassInfo(u, enrolments, classes, profiles);
+        const className = classInfo.class_name;
 
         let guardStr = "";
         let hasDistinctGuardian = false;
@@ -16699,8 +16737,8 @@ async function renderRecordsManagement(container) {
         staffEmergSection.classList.add("portal-hidden");
 
         // Enrolment
-        const enrol = freshEnrols.find(e => e.student_id === u.user_id);
-        document.getElementById("edit-rec-student-class").value = enrol ? enrol.class_id : "";
+        const classInfo = getStudentClassInfo(u, freshEnrols, classes, profiles);
+        document.getElementById("edit-rec-student-class").value = classInfo.class_id || "";
         document.getElementById("edit-rec-student-adm-date").value = p.joining_date ? p.joining_date.split("T")[0] : (p.appointment_date ? p.appointment_date.split("T")[0] : "2026-08-01");
 
         // Guardian parsing
@@ -16767,7 +16805,7 @@ async function renderRecordsManagement(container) {
         document.getElementById("edit-rec-staff-salary").value = (p.base_salary !== undefined && p.base_salary !== null) ? p.base_salary : 2500;
         document.getElementById("edit-rec-staff-allowance").value = (p.allowances !== undefined && p.allowances !== null) ? p.allowances : 300;
 
-        const tClass = freshClasses.find(c => c.class_teacher_id === u.user_id);
+        const tClass = freshClasses.find(c => (u.user_id && c.class_teacher_id === u.user_id) || (u.uid && c.class_teacher_id === u.uid));
         document.getElementById("edit-rec-staff-class").value = tClass ? tClass.class_id : "";
         document.getElementById("edit-rec-staff-addl-role").value = u.role === "SectionalHead" ? "sectional head" : "none";
 
@@ -17125,7 +17163,7 @@ async function renderRecordsManagement(container) {
             const chosenClassId = document.getElementById("edit-rec-staff-class").value;
             const freshClassesList = await window.db.getAll("classes");
             for (const cl of freshClassesList) {
-              if (cl.class_teacher_id === targetUserId && cl.class_id !== chosenClassId) {
+              if ((cl.class_teacher_id === targetUserId || (u.uid && cl.class_teacher_id === u.uid)) && cl.class_id !== chosenClassId) {
                 cl.class_teacher_id = "";
                 await window.db.put("classes", cl);
               }

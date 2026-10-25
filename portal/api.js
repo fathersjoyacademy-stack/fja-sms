@@ -1922,16 +1922,24 @@ const api = {
     try {
       const enrolments = await window.db.getAll("enrolments") || [];
       const users = await window.db.getAll("users") || [];
+      const profiles = await window.db.getAll("profiles") || [];
       
       const classEnrols = enrolments.filter(e => e.class_id === classId);
-      const studentMap = new Map(users.map(u => [u.user_id, u]));
+      const studentMap = new Map();
+      users.forEach(u => {
+        if (u.user_id) studentMap.set(u.user_id, u);
+        if (u.uid) studentMap.set(u.uid, u);
+      });
       
+      const seenStudentIds = new Set();
       const roster = [];
       for (const en of classEnrols) {
         const student = studentMap.get(en.student_id);
         if (!student) continue;
+        if (seenStudentIds.has(student.user_id)) continue;
         if (options.activeOnly && student.status !== "ACTIVE") continue;
         
+        seenStudentIds.add(student.user_id);
         roster.push({
           ...student,
           enrolment_id: en.enrolment_id,
@@ -1939,6 +1947,24 @@ const api = {
           enrolment_date: en.enrolment_date,
           status: student.status || "ACTIVE"
         });
+      }
+
+      // Profile-based fallback for students who have this class in their profile
+      for (const p of profiles) {
+        if (p.current_class_id === classId && p.user_id && !seenStudentIds.has(p.user_id)) {
+          const student = studentMap.get(p.user_id);
+          if (student) {
+            if (options.activeOnly && student.status !== "ACTIVE") continue;
+            seenStudentIds.add(student.user_id);
+            roster.push({
+              ...student,
+              enrolment_id: "prof-" + p.user_id,
+              class_id: classId,
+              enrolment_date: p.appointment_date || "",
+              status: student.status || "ACTIVE"
+            });
+          }
+        }
       }
       
       // Sort alphabetically by last name, then first name
@@ -1961,16 +1987,31 @@ const api = {
       const enrolments = await window.db.getAll("enrolments") || [];
       const classes = await window.db.getAll("classes") || [];
       const users = await window.db.getAll("users") || [];
+      const profiles = await window.db.getAll("profiles") || [];
       
-      const en = enrolments.find(e => e.student_id === studentId);
-      if (!en) return null;
+      let en = enrolments.find(e => e.student_id === studentId);
+      if (!en) {
+        const u = users.find(usr => usr.user_id === studentId || usr.uid === studentId);
+        if (u) {
+          en = enrolments.find(e => e.student_id === u.user_id || e.student_id === u.uid);
+        }
+      }
+
+      let classId = en ? en.class_id : "";
+      if (!classId) {
+        const prof = profiles.find(p => p.user_id === studentId || p.profile_id === studentId);
+        if (prof && prof.current_class_id) {
+          classId = prof.current_class_id;
+        }
+      }
+      if (!classId) return null;
       
-      const cls = classes.find(c => c.class_id === en.class_id);
+      const cls = classes.find(c => c.class_id === classId);
       if (!cls) return null;
       
       let teacherName = "Unassigned";
       if (cls.class_teacher_id) {
-        const teacher = users.find(u => u.user_id === cls.class_teacher_id);
+        const teacher = users.find(u => u.user_id === cls.class_teacher_id || u.uid === cls.class_teacher_id);
         if (teacher) teacherName = this.formatFullName(teacher);
       }
       
@@ -1981,8 +2022,8 @@ const api = {
         section: cls.section || "General",
         class_teacher_id: cls.class_teacher_id,
         class_teacher_name: teacherName,
-        enrolment_id: en.enrolment_id,
-        enrolment_date: en.enrolment_date
+        enrolment_id: en ? en.enrolment_id : "prof-" + studentId,
+        enrolment_date: en ? en.enrolment_date : ""
       };
     } catch (e) {
       console.error("getStudentClass error:", e);
