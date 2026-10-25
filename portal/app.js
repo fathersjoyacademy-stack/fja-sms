@@ -6436,10 +6436,11 @@ async function renderAdmissionsIntake(container) {
           const newInvoice = {
             transaction_id: transactionId,
             student_id: student.user_id,
-            type: "FEE_PAYMENT",
+            type: "BILLING",
             amount: feeAmount,
             payment_method: "N/A",
             reference_no: "INV-" + newUid,
+            billing_description: "Initial Admission Tuition Allocation",
             recorded_by: currentUser.user_id,
             timestamp: new Date().toISOString()
           };
@@ -7279,10 +7280,11 @@ async function renderFeeLedger(container) {
         const paymentRecord = {
           transaction_id: txId,
           student_id: studentId,
-          type: "FEE_PAYMENT",
+          type: "PAYMENT",
           amount: -amount,
           payment_method: method,
           reference_no: ref,
+          billing_description: "Fee Payment - " + ref,
           recorded_by: currentUser.user_id,
           timestamp: new Date().toISOString()
         };
@@ -7372,10 +7374,11 @@ async function renderFeeLedger(container) {
         const invoiceRecord = {
           transaction_id: txId,
           student_id: studentId,
-          type: "FEE_PAYMENT",
+          type: "BILLING",
           amount: amount,
           payment_method: "N/A",
           reference_no: ref,
+          billing_description: ref || "School Fees Allocation",
           recorded_by: currentUser.user_id,
           timestamp: new Date().toISOString()
         };
@@ -7495,11 +7498,11 @@ async function renderFeeLedger(container) {
         const batchBills = unbilledTargets.map((stud) => ({
           transaction_id: "t-invoice-gb-" + stud.user_id + "-" + safeRefSlug,
           student_id: stud.user_id,
-          type: "FEE_PAYMENT",
+          type: "BILLING",
           amount: amount,
           payment_method: "N/A",
           reference_no: "GB - " + ref + " - " + (stud.uid || stud.user_id),
-          billing_description: ref,
+          billing_description: ref || "School Fees Allocation",
           recorded_by: currentUser.user_id,
           timestamp: nowIso,
           created_at: nowIso,
@@ -7596,11 +7599,11 @@ async function renderFeeLedger(container) {
         const batchBills = unbilledTargets.map((stud) => ({
           transaction_id: "t-invoice-bulk-" + stud.user_id + "-" + safeRefSlug,
           student_id: stud.user_id,
-          type: "FEE_PAYMENT",
+          type: "BILLING",
           amount: amount,
           payment_method: "N/A",
           reference_no: ref + " - " + (stud.uid || stud.user_id),
-          billing_description: ref,
+          billing_description: ref || "School Fees Allocation",
           recorded_by: currentUser.user_id,
           timestamp: nowIso,
           created_at: nowIso,
@@ -7871,25 +7874,34 @@ async function renderFeeLedger(container) {
       }
 
       rowsBody.innerHTML = studentTxs.map(t => {
-        const isPayment = t.amount < 0 && t.type !== "REVERSAL";
-        const isCharge = t.amount > 0 && t.type !== "REVERSAL";
-        const color = t.type === "REVERSAL" ? "var(--accent-warning)" : (isPayment ? "var(--accent-success)" : "var(--text-primary)");
+        const isReversal = t.type === "REVERSAL" || (t.reference_no && t.reference_no.startsWith("REV-"));
+        const isBadDebt = t.type === "BAD_DEBT" || (t.reference_no && t.reference_no.startsWith("BD-"));
+        const isPayment = !isReversal && !isBadDebt && (t.type === "PAYMENT" || (t.type === "FEE_PAYMENT" && t.amount < 0) || t.amount < 0);
+        const isCharge = !isReversal && !isBadDebt && !isPayment;
+
+        let displayType = "Fee Billing";
+        if (isBadDebt) displayType = "Bad Debt";
+        else if (isReversal) displayType = "Reversal";
+        else if (isPayment) displayType = "Fee Payment";
+        else displayType = "Fee Billing";
+
+        const color = isReversal ? "var(--accent-warning)" : (isPayment ? "var(--accent-success)" : "var(--text-primary)");
         const displayMethod = isCharge ? "N/A" : (t.payment_method && t.payment_method !== "BANK_TRANSFER" ? t.payment_method : (isPayment ? (t.payment_method || "CASH") : "N/A"));
         
         return `
           <tr style="color:${color}">
             <td>${new Date(t.timestamp).toLocaleDateString()}</td>
             <td><strong>${t.reference_no}</strong></td>
-            <td><span class="badge" style="background:rgba(255,255,255,0.05); color:${color}">${t.type}</span></td>
+            <td><span class="badge" style="background:rgba(255,255,255,0.05); color:${color}">${displayType}</span></td>
             <td>${displayMethod}</td>
-            <td>GH¢ ${t.amount.toFixed(2)}</td>
+            <td>GH¢ ${Math.abs(t.amount).toFixed(2)}</td>
             <td>${t.recorded_by === currentUser.user_id ? "Self" : "Officer"}</td>
             <td style="white-space:nowrap;">
               <div style="display:flex; gap:0.35rem; align-items:center;">
                 ${t.type !== "REVERSAL" ? `
                   <button class="btn btn-secondary btn-reverse-tx" data-id="${t.transaction_id}" data-amount="${t.amount}" data-ref="${t.reference_no}" style="min-height:26px; padding:0 0.45rem; font-size:0.75rem; border-color:var(--accent-warning); color:var(--accent-warning);" title="Post balancing reversal entry">Reverse</button>
                 ` : `<span style="font-size:0.75rem; color:var(--text-muted); margin-right:0.25rem;">Balanced</span>`}
-                <button class="btn btn-secondary btn-delete-tx" data-id="${t.transaction_id}" data-amount="${t.amount}" data-ref="${t.reference_no}" data-type="${t.type}" style="min-height:26px; padding:0 0.45rem; font-size:0.75rem; border-color:var(--accent-danger); color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Permanently delete this entry from student ledger">🗑️ Delete</button>
+                <button class="btn btn-secondary btn-delete-tx" data-id="${t.transaction_id}" data-amount="${t.amount}" data-ref="${t.reference_no}" data-type="${displayType}" style="min-height:26px; padding:0 0.45rem; font-size:0.75rem; border-color:var(--accent-danger); color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Permanently delete this entry from student ledger">🗑️ Delete</button>
               </div>
             </td>
           </tr>
@@ -16681,21 +16693,40 @@ async function renderRecordsManagement(container) {
       }
 
       const relTx = transactions.filter(t => t.student_id === userId || (t.type === "PAYROLL" && t.student_id === null && t.reference_no && t.reference_no.includes(u.uid)));
-      document.getElementById("profile-financial-rows").innerHTML = relTx.map(t => `
+      const isStudent = u.role === "Student";
+      const renderProfileTxRow = (t) => {
+        const isReversal = t.type === "REVERSAL" || (t.reference_no && t.reference_no.startsWith("REV-"));
+        const isBadDebt = t.type === "BAD_DEBT" || (t.reference_no && t.reference_no.startsWith("BD-"));
+        const isPayment = !isReversal && !isBadDebt && (t.type === "PAYMENT" || (t.type === "FEE_PAYMENT" && t.amount < 0) || t.amount < 0);
+        
+        let displayType = "Fee Billing";
+        if (t.type === "PAYROLL") displayType = "Staff Payroll";
+        else if (isBadDebt) displayType = "Bad Debt";
+        else if (isReversal) displayType = "Reversal";
+        else if (isPayment) displayType = "Fee Payment";
+        else displayType = "Fee Billing";
+
+        let defaultDesc = isStudent ? (isPayment ? "Fee Payment Deposit" : "School Fees Allocation") : "Payroll slip allocation";
+        let displayDesc = t.billing_description || defaultDesc;
+        const badgeClass = isPayment ? "badge-success" : (displayType === "Fee Billing" ? "badge-info" : "badge-secondary");
+
+        return `
         <tr>
           <td>${new Date(t.timestamp).toLocaleDateString()}</td>
           <td>${t.reference_no}</td>
-          <td>${t.billing_description || 'Payroll slip allocation'}</td>
-          <td><span class="badge badge-info">${t.type}</span></td>
-          <td>${t.payment_method}</td>
+          <td>${displayDesc}</td>
+          <td><span class="badge ${badgeClass}">${displayType}</span></td>
+          <td>${t.payment_method || (isPayment ? 'CASH' : 'N/A')}</td>
           <td style="color:${t.amount < 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">
             <strong>GH¢ ${Math.abs(t.amount).toFixed(2)}</strong>
           </td>
           <td>
-            <button class="btn btn-secondary btn-del-profile-tx" data-id="${t.transaction_id}" data-ref="${t.reference_no}" data-amount="${t.amount}" data-type="${t.type}" style="min-height:24px; padding:0 0.4rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this entry">🗑️ Delete</button>
+            <button class="btn btn-secondary btn-del-profile-tx" data-id="${t.transaction_id}" data-ref="${t.reference_no}" data-amount="${t.amount}" data-type="${displayType}" style="min-height:24px; padding:0 0.4rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this entry">🗑️ Delete</button>
           </td>
-        </tr>
-      `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
+        </tr>`;
+      };
+
+      document.getElementById("profile-financial-rows").innerHTML = relTx.map(renderProfileTxRow).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
 
       // Delete entry hook inside profile modal
       document.getElementById("profile-financial-rows").querySelectorAll(".btn-del-profile-tx").forEach(btn => {
@@ -16712,17 +16743,7 @@ async function renderRecordsManagement(container) {
             showToast(`Entry (${ref}) deleted successfully.`, "success");
             const freshTxs = await window.db.getAll("financial_transactions") || [];
             const freshRel = freshTxs.filter(t => t.student_id === userId || (t.type === "PAYROLL" && t.student_id === null && t.reference_no && t.reference_no.includes(u.uid)));
-            document.getElementById("profile-financial-rows").innerHTML = freshRel.map(t => `
-              <tr>
-                <td>${new Date(t.timestamp).toLocaleDateString()}</td>
-                <td>${t.reference_no}</td>
-                <td>${t.billing_description || 'Payroll slip allocation'}</td>
-                <td><span class="badge badge-info">${t.type}</span></td>
-                <td>${t.payment_method}</td>
-                <td style="color:${t.amount < 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}"><strong>GH¢ ${Math.abs(t.amount).toFixed(2)}</strong></td>
-                <td><button class="btn btn-secondary btn-del-profile-tx" data-id="${t.transaction_id}" data-ref="${t.reference_no}" data-amount="${t.amount}" data-type="${t.type}" style="min-height:24px; padding:0 0.4rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this entry">🗑️ Delete</button></td>
-              </tr>
-            `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
+            document.getElementById("profile-financial-rows").innerHTML = freshRel.map(renderProfileTxRow).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No financial logs recorded.</td></tr>`;
             if (typeof window._refreshFeeLedger === "function") window._refreshFeeLedger();
           } catch (err) {
             showToast("Failed to delete entry: " + err.message, "danger");

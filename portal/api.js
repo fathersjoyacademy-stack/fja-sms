@@ -1696,13 +1696,21 @@ const api = {
         runningBalance += amountVal;
       }
 
+      let displayType = "Fee Billing";
+      if (isBadDebt) displayType = "Bad Debt";
+      else if (isReversal) displayType = "Reversal";
+      else if (isPayment) displayType = "Fee Payment";
+      else displayType = "Fee Billing";
+
+      let defaultDesc = isPayment ? "Fee Payment Deposit" : "School Fees Allocation";
+
       return {
         transaction_id: t.transaction_id,
         date: t.timestamp ? new Date(t.timestamp).toLocaleDateString() : "N/A",
         timestamp: t.timestamp,
         ref: t.reference_no || t.transaction_id || "N/A",
-        desc: t.billing_description || (isBadDebt ? "Bad Debt Write-off (Archived Student)" : (isReversal ? "Ledger Reversal Correction" : (isPayment ? "Fee Payment / Deposit" : "Tuition Fee / Charge"))),
-        type: isBadDebt ? "BAD DEBT" : (isReversal ? "REVERSAL" : (isPayment ? "PAYMENT" : "INVOICE / BILL")),
+        desc: t.billing_description || defaultDesc,
+        type: displayType,
         method: isPayment ? (t.payment_method || "CASH") : (isBadDebt ? "BAD_DEBT" : (isReversal ? (t.payment_method && t.payment_method !== "BANK_TRANSFER" ? t.payment_method : "N/A") : "N/A")),
         amount: amountVal,
         balanceAfter: runningBalance,
@@ -1787,7 +1795,7 @@ const api = {
     });
 
     // Capture any fee payments recorded without explicit student_id attachment
-    const orphanFeePayments = filteredTx.filter(t => !t.student_id && t.type === "FEE_PAYMENT" && t.amount < 0 && t.type !== "REVERSAL");
+    const orphanFeePayments = filteredTx.filter(t => !t.student_id && (t.type === "PAYMENT" || t.type === "FEE_PAYMENT") && t.amount < 0 && t.type !== "REVERSAL");
     orphanFeePayments.forEach(t => {
       feesCollected += Math.abs(t.amount);
     });
