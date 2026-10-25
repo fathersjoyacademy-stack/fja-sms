@@ -7261,7 +7261,21 @@ async function renderFeeLedger(container) {
       }
 
       try {
-        const txId = "t-payment-" + Date.now();
+        const safeRefSlug = ref.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+        const txId = "t-payment-" + studentId + "-" + safeRefSlug + "-" + Date.now();
+
+        // Check for duplicate receipt reference
+        const existingTxs = await window.db.getAll("financial_transactions") || [];
+        const isDuplicate = existingTxs.some(t => t.reference_no && t.reference_no.trim().toLowerCase() === ref.trim().toLowerCase());
+        if (isDuplicate) {
+          showToast(`A payment receipt with reference "${ref}" has already been recorded! Duplicate payment prevented.`, "warning");
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitBtn.dataset.origText || "Record Payment";
+          }
+          return;
+        }
+
         const paymentRecord = {
           transaction_id: txId,
           student_id: studentId,
@@ -7340,7 +7354,21 @@ async function renderFeeLedger(container) {
       }
 
       try {
-        const txId = "t-invoice-" + Date.now();
+        const safeRefSlug = ref.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+        const txId = "t-invoice-" + studentId + "-" + safeRefSlug;
+
+        // Check for duplicate billing on this student
+        const existingTxs = await window.db.getAll("financial_transactions") || [];
+        const isDuplicate = existingTxs.some(t => t.student_id === studentId && (t.type === "FEE_PAYMENT" || t.type === "INVOICE" || t.type === "BILLING") && t.amount > 0 && t.reference_no && (t.reference_no.trim().toLowerCase() === ref.trim().toLowerCase() || t.reference_no.includes(ref)));
+        if (isDuplicate) {
+          showToast(`Student ${studentName} has already been billed with reference "${ref}"! Duplicate invoice prevented.`, "warning");
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = submitBtn.dataset.origText || "Post Bill";
+          }
+          return;
+        }
+
         const invoiceRecord = {
           transaction_id: txId,
           student_id: studentId,
@@ -7442,9 +7470,45 @@ async function renderFeeLedger(container) {
           return;
         }
 
-        const nowStr = new Date().toISOString(); const tStamp = Date.now(); const count = targets.length; await Promise.all(targets.map((stud, i) => window.db.put("financial_transactions", { transaction_id: "t-invoice-gb-" + stud.user_id + "-" + tStamp + "-" + i, student_id: stud.user_id, type: "FEE_PAYMENT", amount: amount, payment_method: "N/A", reference_no: "GB-" + tStamp.toString().substring(9) + "-" + stud.uid, recorded_by: currentUser.user_id, timestamp: nowStr })));
+        const nowIso = new Date().toISOString();
+        const safeRefSlug = ref.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
 
-        showToast(`Group billing posted successfully to ${count} students!`, "success");
+        // Deduplication check: check which students already have this bill
+        const existingTxs = await window.db.getAll("financial_transactions") || [];
+        const alreadyBilledIds = new Set(
+          existingTxs
+            .filter(t => t.student_id && (t.type === "FEE_PAYMENT" || t.type === "INVOICE" || t.type === "BILLING") && t.amount > 0)
+            .map(t => {
+              const r = String(t.reference_no || "");
+              return (r === ref || r.includes(ref)) ? t.student_id : null;
+            })
+            .filter(Boolean)
+        );
+
+        const unbilledTargets = targets.filter(s => !alreadyBilledIds.has(s.user_id));
+        if (unbilledTargets.length === 0) {
+          showToast(`All ${targets.length} students in this scope have already been billed for "${ref}"! Duplicate avoided.`, "warning");
+          document.getElementById("group-billing-modal").classList.add("portal-hidden");
+          return;
+        }
+
+        const batchBills = unbilledTargets.map((stud) => ({
+          transaction_id: "t-invoice-gb-" + stud.user_id + "-" + safeRefSlug,
+          student_id: stud.user_id,
+          type: "FEE_PAYMENT",
+          amount: amount,
+          payment_method: "N/A",
+          reference_no: "GB - " + ref + " - " + (stud.uid || stud.user_id),
+          billing_description: ref,
+          recorded_by: currentUser.user_id,
+          timestamp: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso,
+          synced: false
+        }));
+
+        await window.db.putBatch("financial_transactions", batchBills);
+        showToast(`Group billing posted successfully to ${batchBills.length} students!` + (alreadyBilledIds.size > 0 ? ` (${alreadyBilledIds.size} already billed)` : ""), "success");
         document.getElementById("group-billing-modal").classList.add("portal-hidden");
         document.getElementById("form-group-billing").reset();
         loadLedgerList();
@@ -7507,9 +7571,45 @@ async function renderFeeLedger(container) {
           return;
         }
 
-        const nowStr = new Date().toISOString(); const tStamp = Date.now(); const count = targets.length; await Promise.all(targets.map((stud, i) => window.db.put("financial_transactions", { transaction_id: "t-invoice-bulk-" + stud.user_id + "-" + tStamp + "-" + i, student_id: stud.user_id, type: "FEE_PAYMENT", amount: amount, payment_method: "N/A", reference_no: ref + "-" + stud.uid, recorded_by: currentUser.user_id, timestamp: nowStr })));
+        const nowIso = new Date().toISOString();
+        const safeRefSlug = ref.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
 
-        showToast(`Terminal fees of GH¢ ${amount.toFixed(2)} posted successfully to ${count} students!`, "success");
+        // Deduplication check: check which students already have this terminal fee bill
+        const existingTxs = await window.db.getAll("financial_transactions") || [];
+        const alreadyBilledIds = new Set(
+          existingTxs
+            .filter(t => t.student_id && (t.type === "FEE_PAYMENT" || t.type === "INVOICE" || t.type === "BILLING") && t.amount > 0)
+            .map(t => {
+              const r = String(t.reference_no || "");
+              return (r === ref || r.includes(ref)) ? t.student_id : null;
+            })
+            .filter(Boolean)
+        );
+
+        const unbilledTargets = targets.filter(s => !alreadyBilledIds.has(s.user_id));
+        if (unbilledTargets.length === 0) {
+          showToast(`All ${targets.length} students in this target group have already been billed for "${ref}"! Duplicate avoided.`, "warning");
+          document.getElementById("terminal-fees-modal").classList.add("portal-hidden");
+          return;
+        }
+
+        const batchBills = unbilledTargets.map((stud) => ({
+          transaction_id: "t-invoice-bulk-" + stud.user_id + "-" + safeRefSlug,
+          student_id: stud.user_id,
+          type: "FEE_PAYMENT",
+          amount: amount,
+          payment_method: "N/A",
+          reference_no: ref + " - " + (stud.uid || stud.user_id),
+          billing_description: ref,
+          recorded_by: currentUser.user_id,
+          timestamp: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso,
+          synced: false
+        }));
+
+        await window.db.putBatch("financial_transactions", batchBills);
+        showToast(`Terminal fees of GH¢ ${amount.toFixed(2)} posted successfully to ${batchBills.length} students!` + (alreadyBilledIds.size > 0 ? ` (${alreadyBilledIds.size} already billed)` : ""), "success");
         document.getElementById("terminal-fees-modal").classList.add("portal-hidden");
         document.getElementById("form-terminal-fees").reset();
         loadLedgerList();

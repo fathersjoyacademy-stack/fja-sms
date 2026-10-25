@@ -107,39 +107,77 @@ function isStudentFeeTransaction(tx) {
 }
 
 async function purgeStudentFeeEntriesCleanSlate(force = false) {
-  if (typeof localStorage === "undefined") return 0;
-  if (!force && localStorage.getItem(FEE_CLEAN_SLATE_KEY) === "completed") return 0;
+  // Permanently decommissioned clean-slate purge to protect production fee entries
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem(FEE_CLEAN_SLATE_KEY, "completed");
+    } catch (e) {}
+  }
+  return 0;
+}
 
+// Self-healing billing routine: ensures all active enrolled students have their terminal tuition bill
+async function ensureStudentTerminalBills() {
+  if (DB_READ_ONLY) return 0;
   try {
-    const allTxs = await db.getAll("financial_transactions");
-    let count = 0;
-    if (allTxs && allTxs.length > 0) {
-      for (const tx of allTxs) {
-        if (isStudentFeeTransaction(tx)) {
-          const txTime = tx.created_at || tx.timestamp || "1970-01-01";
-          if (force || new Date(txTime).getTime() <= new Date(FEE_CLEAN_SLATE_TIMESTAMP).getTime()) {
-            await db.deleteLocal("financial_transactions", tx.transaction_id);
-            count++;
-            if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
-              try {
-                firebase.firestore().collection("financial_transactions").doc(tx.transaction_id).delete().catch(() => {});
-              } catch (e) {}
-            }
-          }
+    const users = await db.getAll("users");
+    if (!users || users.length === 0) return 0;
+    const activeStudents = users.filter(u => u.role === "Student" && u.status === "ACTIVE");
+    if (activeStudents.length === 0) return 0;
+
+    const allTxs = await db.getAll("financial_transactions") || [];
+    const calendar = await db.get("academic_calendar", "main-calendar");
+    const activeTerm = (calendar && calendar.active_term) ? calendar.active_term : "Term 3";
+    const academicYear = (calendar && calendar.academic_year) ? calendar.academic_year : "2026/2027";
+    const billRefPrefix = `Tuition Fee ${activeTerm}`;
+    const standardFeeAmount = 1800.00;
+
+    // Check existing bills to prevent duplicate billing
+    const billedStudentIds = new Set();
+    allTxs.forEach(tx => {
+      if (tx.student_id && (tx.type === "FEE_PAYMENT" || tx.type === "INVOICE" || tx.type === "BILLING") && tx.amount > 0) {
+        const ref = String(tx.reference_no || "");
+        const desc = String(tx.billing_description || "");
+        if (ref.includes(activeTerm) || ref.includes(academicYear) || ref.includes("Tuition Fee") || desc.includes("Tuition")) {
+          billedStudentIds.add(tx.student_id);
         }
       }
-    }
-    localStorage.setItem(FEE_CLEAN_SLATE_KEY, "completed");
-    console.log(`Student fee entries clean slate: purged ${count} records from local database.`);
-    if (count > 0 && typeof window !== "undefined") {
+    });
+
+    const unbilledStudents = activeStudents.filter(s => !billedStudentIds.has(s.user_id));
+    if (unbilledStudents.length === 0) return 0;
+
+    console.log(`[Auto-Billing] Generating ${activeTerm} (${academicYear}) tuition billing for ${unbilledStudents.length} active students...`);
+
+    const nowIso = new Date().toISOString();
+    const safeRefSlug = `tuition_fee_${activeTerm.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${academicYear.replace(/[^a-z0-9]/g, "_")}`;
+    const newBills = unbilledStudents.map((stud) => ({
+      transaction_id: `t-bill-${stud.user_id}-${safeRefSlug}`,
+      student_id: stud.user_id,
+      type: "FEE_PAYMENT",
+      amount: standardFeeAmount,
+      payment_method: "N/A",
+      reference_no: `${billRefPrefix} - ${stud.uid || stud.user_id}`,
+      billing_description: `${academicYear} ${activeTerm} Tuition Fee & Operational Services`,
+      recorded_by: "u-proprietor-1",
+      timestamp: nowIso,
+      created_at: nowIso,
+      updated_at: nowIso,
+      synced: false
+    }));
+
+    await db.putBatch("financial_transactions", newBills);
+    console.log(`✓ [Auto-Billing] Successfully posted tuition bills for ${newBills.length} students.`);
+
+    if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "financial_transactions" } }));
       if (typeof window._refreshFeeLedger === "function") {
         window._refreshFeeLedger();
       }
     }
-    return count;
+    return newBills.length;
   } catch (err) {
-    console.warn("purgeStudentFeeEntriesCleanSlate notice:", err);
+    console.warn("ensureStudentTerminalBills notice:", err);
     return 0;
   }
 }
@@ -1567,6 +1605,7 @@ async function seedMockData() {
   const users = await db.getAll("users");
   if (users.length > 0) {
     // Database already initialized with clean slate or live data
+    ensureStudentTerminalBills().catch(() => {});
     return;
   }
 
@@ -2000,7 +2039,7 @@ function getStoresForUserRole(role) {
   if (role === "Student") {
     return [
       "users", "profiles", "classes", "enrolments", "assignments", "student_scores",
-      "attendance", "notifications", "portal_messages", "notification_user_reads",
+      "attendance", "financial_transactions", "notifications", "portal_messages", "notification_user_reads",
       "subjects", "cms_content", "academic_calendar", "elibrary_books"
     ];
   }
@@ -2126,6 +2165,7 @@ async function startFirestoreSync(specificStores = null) {
 
     // Trigger score and profile self-healing asynchronously
     healDatabaseScoresAndProfiles().catch(() => {});
+    ensureStudentTerminalBills().catch(() => {});
 
     // Role-based store pruning to prevent exhausting free-tier read limits
     const currentRole = (window.currentUser && window.currentUser.role) || (typeof currentUser !== "undefined" && currentUser ? currentUser.role : null);
@@ -2315,7 +2355,8 @@ async function startFirestoreSync(specificStores = null) {
           "academic_calendar",
           "subjects",
           "cms_content",
-          "prospectuses"
+          "prospectuses",
+          "financial_transactions"
         ];
 
         // Apply Delta filter to onSnapshot queries to avoid reading the whole collection on connect
@@ -2470,6 +2511,8 @@ if (typeof window !== "undefined") {
 // Export objects
 window.db = db;
 window.db.putBatch = db.putBatch;
+window.db.ensureStudentTerminalBills = ensureStudentTerminalBills;
+window.ensureStudentTerminalBills = ensureStudentTerminalBills;
 window.db.purgeStudentFeeEntriesCleanSlate = purgeStudentFeeEntriesCleanSlate;
 window.isStudentFeeTransaction = isStudentFeeTransaction;
 window.healDatabaseScoresAndProfiles = healDatabaseScoresAndProfiles;
