@@ -18844,7 +18844,13 @@ function refreshCurrentDashboardView(delay = 400) {
 // Global Cross-Device Real-time Event Synchronizer
 window.addEventListener("dbSyncUpdate", async (e) => {
   try {
-    const { storeName, docData } = e.detail || {};
+    const { storeName, docData, allStores } = e.detail || {};
+    if (allStores) {
+      if (typeof refreshCurrentDashboardView === "function") {
+        refreshCurrentDashboardView(50);
+      }
+      return;
+    }
     const user = window.api && typeof window.api.getCurrentUser === "function" ? window.api.getCurrentUser() : null;
 
     // 1. Live header profile and avatar updates
@@ -22125,7 +22131,208 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
   });
+
+  initSyncModalController();
 });
+
+// ==========================================
+// CROSS-DEVICE DATA SYNC & PARITY CONTROLLER
+// ==========================================
+function initSyncModalController() {
+  const syncBtn = document.getElementById("btn-sync-modal");
+  const syncModal = document.getElementById("sync-transfer-modal");
+  const closeBtnTop = document.getElementById("btn-close-sync-modal");
+  const closeBtnBottom = document.getElementById("btn-close-sync-modal-bottom");
+  const statusPill = document.getElementById("sync-modal-status-pill");
+  const statusDesc = document.getElementById("sync-modal-status-desc");
+  const iconSymbol = document.getElementById("sync-icon-symbol");
+
+  const btnCopySyncCode = document.getElementById("btn-copy-sync-code");
+  const btnShowPasteCode = document.getElementById("btn-show-paste-code");
+  const pasteArea = document.getElementById("sync-code-paste-area");
+  const pasteTextarea = document.getElementById("sync-paste-textarea");
+  const btnApplySyncCode = document.getElementById("btn-apply-sync-code");
+  const btnExportDbFile = document.getElementById("btn-export-db-file");
+  const inputImportDbFile = document.getElementById("input-import-db-file");
+  const btnForceCloudResync = document.getElementById("btn-force-cloud-resync");
+
+  function updateCloudStatusDisplay() {
+    if (!navigator.onLine) {
+      if (statusPill) { statusPill.className = "badge badge-warning"; statusPill.textContent = "Offline (Local Mode)"; }
+      if (statusDesc) { statusDesc.textContent = "Offline. Changes are preserved safely in local storage."; }
+      if (iconSymbol) iconSymbol.textContent = "⚡";
+    } else if (window.isFirestoreQuotaExceeded) {
+      if (statusPill) { statusPill.className = "badge badge-warning"; statusPill.textContent = "Quota Reached (Offline-First)"; }
+      if (statusDesc) { statusDesc.textContent = "Firebase daily free read limit reached (resets at 07:00 UTC). System is working in complete local mode. Use Quick Sync Code or Backup File to sync between devices right now."; }
+      if (iconSymbol) iconSymbol.textContent = "⚠️";
+    } else {
+      if (statusPill) { statusPill.className = "badge badge-success"; statusPill.textContent = "Connected & Synchronized"; }
+      if (statusDesc) { statusDesc.textContent = "Cloud sync engine is active and operational."; }
+      if (iconSymbol) iconSymbol.textContent = "☁";
+    }
+  }
+
+  function openSyncModal() {
+    updateCloudStatusDisplay();
+    if (syncModal) syncModal.classList.remove("portal-hidden");
+  }
+
+  function closeSyncModal() {
+    if (syncModal) syncModal.classList.add("portal-hidden");
+  }
+
+  if (syncBtn) syncBtn.addEventListener("click", openSyncModal);
+  if (closeBtnTop) closeBtnTop.addEventListener("click", closeSyncModal);
+  if (closeBtnBottom) closeBtnBottom.addEventListener("click", closeSyncModal);
+
+  // Toggle paste code section
+  if (btnShowPasteCode && pasteArea) {
+    btnShowPasteCode.addEventListener("click", () => {
+      pasteArea.classList.toggle("portal-hidden");
+      if (!pasteArea.classList.contains("portal-hidden") && pasteTextarea) {
+        pasteTextarea.focus();
+      }
+    });
+  }
+
+  // Copy sync code
+  if (btnCopySyncCode) {
+    btnCopySyncCode.addEventListener("click", async () => {
+      btnCopySyncCode.disabled = true;
+      btnCopySyncCode.textContent = "Generating Code...";
+      try {
+        const backup = await window.db.exportFullDatabase();
+        const code = window.db.getSyncCode(backup);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(code);
+          showToast("Sync Code copied to clipboard! Paste on other device.", "success");
+        } else {
+          prompt("Copy this Sync Code:", code);
+        }
+      } catch (err) {
+        showToast("Failed to copy sync code: " + err.message, "danger");
+      } finally {
+        btnCopySyncCode.disabled = false;
+        btnCopySyncCode.textContent = "📋 Copy Sync Code from this Device";
+      }
+    });
+  }
+
+  // Apply sync code
+  if (btnApplySyncCode && pasteTextarea) {
+    btnApplySyncCode.addEventListener("click", async () => {
+      const code = (pasteTextarea.value || "").trim();
+      if (!code) {
+        showToast("Please paste the Sync Code from your other device.", "warning");
+        return;
+      }
+      btnApplySyncCode.disabled = true;
+      btnApplySyncCode.textContent = "Applying Data Bundle...";
+      try {
+        const bundle = window.db.parseSyncCode(code);
+        const count = await window.db.importFullDatabase(bundle);
+        showToast(`Successfully synchronized ${count} records across all portals!`, "success");
+        pasteTextarea.value = "";
+        closeSyncModal();
+        if (typeof refreshCurrentDashboardView === "function") {
+          refreshCurrentDashboardView(50);
+        }
+      } catch (err) {
+        showToast("Invalid sync code: " + err.message, "danger");
+      } finally {
+        btnApplySyncCode.disabled = false;
+        btnApplySyncCode.textContent = "✓ Apply Sync Code & Reload Portals";
+      }
+    });
+  }
+
+  // Download backup file (.json)
+  if (btnExportDbFile) {
+    btnExportDbFile.addEventListener("click", async () => {
+      btnExportDbFile.disabled = true;
+      btnExportDbFile.textContent = "Exporting...";
+      try {
+        const backup = await window.db.exportFullDatabase();
+        const jsonStr = JSON.stringify(backup, null, 2);
+        const blob = new Blob([jsonStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const dateStr = new Date().toISOString().split("T")[0];
+        a.href = url;
+        a.download = `fja_sms_database_backup_${dateStr}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Full database backup downloaded successfully!", "success");
+      } catch (err) {
+        showToast("Export failed: " + err.message, "danger");
+      } finally {
+        btnExportDbFile.disabled = false;
+        btnExportDbFile.textContent = "💾 Download Full Backup";
+      }
+    });
+  }
+
+  // Upload backup file (.json)
+  if (inputImportDbFile) {
+    inputImportDbFile.addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        showToast("Reading database file...", "info");
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const bundle = JSON.parse(evt.target.result);
+            const count = await window.db.importFullDatabase(bundle);
+            showToast(`Database restored: ${count} records synchronized!`, "success");
+            closeSyncModal();
+            if (typeof refreshCurrentDashboardView === "function") {
+              refreshCurrentDashboardView(50);
+            }
+          } catch (parseErr) {
+            showToast("Failed to parse backup JSON: " + parseErr.message, "danger");
+          }
+        };
+        reader.readAsText(file);
+      } catch (err) {
+        showToast("Restore failed: " + err.message, "danger");
+      } finally {
+        inputImportDbFile.value = "";
+      }
+    });
+  }
+
+  // Force cloud resync
+  if (btnForceCloudResync) {
+    btnForceCloudResync.addEventListener("click", async () => {
+      btnForceCloudResync.disabled = true;
+      btnForceCloudResync.textContent = "Syncing Cloud...";
+      try {
+        window.isFirestoreQuotaExceeded = false;
+        if (typeof window.clearAllFirestoreListeners === "function") {
+          window.clearAllFirestoreListeners();
+        }
+        if (typeof window.startFirestoreSync === "function") {
+          await window.startFirestoreSync();
+        }
+        updateCloudStatusDisplay();
+        showToast("Cloud sync refreshed.", "info");
+      } catch (err) {
+        showToast("Cloud resync notice: " + err.message, "warning");
+      } finally {
+        btnForceCloudResync.disabled = false;
+        btnForceCloudResync.textContent = "🔄 Force Cloud Resync";
+      }
+    });
+  }
+
+  window.addEventListener("online", updateCloudStatusDisplay);
+  window.addEventListener("offline", updateCloudStatusDisplay);
+  window.addEventListener("firestoreQuotaExceeded", updateCloudStatusDisplay);
+  updateCloudStatusDisplay();
+}
 
 
 

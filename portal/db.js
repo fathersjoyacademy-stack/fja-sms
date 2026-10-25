@@ -108,10 +108,13 @@ function isStudentFeeTransaction(tx) {
 
 const WIPE_MANUAL_BILLING_EPOCH = "fja_wipe_manual_billing_clean_slate_2026_10_25_v2";
 
-// Wipe all student fee entries for clean manual entry as requested by user
+// Wipe all student fee entries for clean manual entry as requested by user (Manual Trigger Only)
 async function wipeAllStudentFeeEntries(force = false) {
+  if (!force) {
+    // Disabled automatically to prevent cross-device data desync
+    return 0;
+  }
   if (typeof localStorage === "undefined") return 0;
-  if (!force && localStorage.getItem(WIPE_MANUAL_BILLING_EPOCH) === "completed") return 0;
 
   try {
     const allTxs = await db.getAll("financial_transactions") || [];
@@ -130,7 +133,7 @@ async function wipeAllStudentFeeEntries(force = false) {
       }
     }
     localStorage.setItem(WIPE_MANUAL_BILLING_EPOCH, "completed");
-    console.log(`[Clean Slate Wipe] Wiped ${count} student fee entries. Ledger is ready for clean manual entry.`);
+    console.log(`[Manual Wipe] Wiped ${count} student fee entries upon administrative trigger.`);
     if (count > 0 && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "financial_transactions" } }));
       if (typeof window._refreshFeeLedger === "function") {
@@ -161,7 +164,6 @@ async function initDB() {
 
     request.onsuccess = (e) => {
       dbInstance = e.target.result;
-      wipeAllStudentFeeEntries().catch(() => {});
       resolve(dbInstance);
     };
 
@@ -1568,7 +1570,6 @@ async function seedMockData() {
   const users = await db.getAll("users");
   if (users.length > 0) {
     // Database already initialized with clean slate or live data
-    wipeAllStudentFeeEntries().catch(() => {});
     return;
   }
 
@@ -1978,6 +1979,7 @@ function sanitizeIncomingDoc(storeName, docId, docData) {
 const activeFirestoreUnsubscribes = {};
 
 function clearAllFirestoreListeners() {
+  isFullFirestoreSyncRunning = false;
   Object.keys(activeFirestoreUnsubscribes).forEach(storeName => {
     if (Array.isArray(activeFirestoreUnsubscribes[storeName])) {
       activeFirestoreUnsubscribes[storeName].forEach(unsub => {
@@ -2141,9 +2143,16 @@ async function healDatabaseScoresAndProfiles() {
   }
 }
 
+let isFullFirestoreSyncRunning = false;
+
 async function startFirestoreSync(specificStores = null) {
   if (!window.isFirebaseConfigured || !window.isFirebaseConfigured()) {
     console.log("Firebase not configured - running in local-only Mode.");
+    return;
+  }
+
+  // If full listener suite is already initialized and active, do not tear down and re-query
+  if (!specificStores && isFullFirestoreSyncRunning) {
     return;
   }
 
@@ -2155,9 +2164,8 @@ async function startFirestoreSync(specificStores = null) {
     await ensureFirebaseAuth();
     const firestore = firebase.firestore();
 
-    // Trigger score self-healing and one-time clean-slate fee wipe asynchronously
+    // Trigger score self-healing asynchronously
     healDatabaseScoresAndProfiles().catch(() => {});
-    wipeAllStudentFeeEntries().catch(() => {});
 
     // Role-based store pruning to prevent exhausting free-tier read limits
     const authUser = getActiveAuthUser();
@@ -2413,12 +2421,22 @@ async function startFirestoreSync(specificStores = null) {
             });
             localStorage.setItem(lastSyncKey, new Date().toISOString());
           }, err => {
+            if (err && (err.code === "resource-exhausted" || (err.message && err.message.includes("Quota exceeded")))) {
+              window.isFirestoreQuotaExceeded = true;
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("firestoreQuotaExceeded", { detail: { error: err, storeName } }));
+              }
+            }
             console.warn(`Firestore snapshot sync for ${storeName}:`, err);
           });
           activeFirestoreUnsubscribes[storeName].push(unsub);
         });
       }
     });
+
+    if (!specificStores) {
+      isFullFirestoreSyncRunning = true;
+    }
 
     // Real-time listener for gallery chunk updates across clients
     try {
@@ -2502,8 +2520,71 @@ if (typeof window !== "undefined") {
   }, 60000);
 }
 
+// Cross-Device Full Database Export & Import for 100% Mobile/Desktop Parity
+async function exportFullDatabase() {
+  const backup = {
+    version: DB_VERSION,
+    exported_at: new Date().toISOString(),
+    stores: {}
+  };
+  for (const storeName of STORES_TO_SYNC) {
+    try {
+      const records = await db.getAll(storeName) || [];
+      backup.stores[storeName] = records;
+    } catch (e) {
+      console.warn(`Export skipped for store ${storeName}:`, e);
+    }
+  }
+  return backup;
+}
+
+async function importFullDatabase(backup) {
+  if (!backup || !backup.stores || typeof backup.stores !== "object") {
+    throw new Error("Invalid database backup bundle. Must contain a 'stores' object.");
+  }
+  let totalRestored = 0;
+  for (const storeName in backup.stores) {
+    if (STORES_TO_SYNC.includes(storeName)) {
+      const records = backup.stores[storeName];
+      if (Array.isArray(records)) {
+        for (const item of records) {
+          try {
+            await db.putLocal(storeName, item);
+            totalRestored++;
+          } catch (e) {}
+        }
+      }
+    }
+  }
+  // Immediately dispatch a comprehensive sync update event for all listeners
+  window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { allStores: true, totalRestored } }));
+  return totalRestored;
+}
+
+function getSyncCode(backup) {
+  const jsonStr = JSON.stringify(backup);
+  return btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (match, p1) => {
+    return String.fromCharCode("0x" + p1);
+  }));
+}
+
+function parseSyncCode(code) {
+  const decodedStr = decodeURIComponent(Array.prototype.map.call(atob(code.trim()), (c) => {
+    return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join(""));
+  return JSON.parse(decodedStr);
+}
+
 // Export objects
 window.db = db;
+window.db.exportFullDatabase = exportFullDatabase;
+window.db.importFullDatabase = importFullDatabase;
+window.db.getSyncCode = getSyncCode;
+window.db.parseSyncCode = parseSyncCode;
+window.exportFullDatabase = exportFullDatabase;
+window.importFullDatabase = importFullDatabase;
+window.getSyncCode = getSyncCode;
+window.parseSyncCode = parseSyncCode;
 window.db.putBatch = db.putBatch;
 window.db.wipeAllStudentFeeEntries = wipeAllStudentFeeEntries;
 window.wipeAllStudentFeeEntries = wipeAllStudentFeeEntries;

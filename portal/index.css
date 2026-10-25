@@ -2005,6 +2005,16 @@ input[type="button"]:disabled,
   .mobile-only-block {
     display: block !important;
   }
+  /* On mobile screens, hide horizontal tabs in Financial Accounts so only the selected header is visible */
+  .fa-subtab-bar {
+    display: none !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .sync-btn-label {
+    display: none !important;
+  }
 }
 
 
