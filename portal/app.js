@@ -17121,7 +17121,9 @@ async function renderRecordsManagement(container) {
         financial: document.getElementById("profile-panel-financial")
       };
 
+      let currentActiveSection = "personal";
       function setMobileProfileTab(activeSection) {
+        currentActiveSection = activeSection;
         if (window.innerWidth <= 768) {
           pTabBtns.forEach(btn => {
             if (btn.getAttribute("data-section") === activeSection) {
@@ -17147,6 +17149,12 @@ async function renderRecordsManagement(container) {
         const gridCont = document.getElementById("profile-modal-grid-container");
         if (gridCont) gridCont.scrollTop = 0;
       }
+
+      window.addEventListener("resize", () => {
+        if (profileModal && !profileModal.classList.contains("portal-hidden")) {
+          setMobileProfileTab(currentActiveSection);
+        }
+      });
 
       pTabBtns.forEach(btn => {
         btn.onclick = () => {
@@ -18821,7 +18829,19 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (typeof window._refreshAdmissionsIntake === "function") {
         debouncedSyncRefresh("admissions", window._refreshAdmissionsIntake, 300);
       }
-      if (["proprietor-records-overview", "records-dashboard", "records-management"].includes(window.currentDashboardSubview)) {
+      if ([
+        "proprietor-records-overview",
+        "records-dashboard",
+        "records-management",
+        "student-dash",
+        "parent-dash",
+        "teacher-dash",
+        "teacher-attendance",
+        "teacher-grading",
+        "fee-ledger",
+        "payroll-engine",
+        "proprietor-finance-overview"
+      ].includes(window.currentDashboardSubview)) {
         refreshCurrentDashboardView(400);
       }
     }
@@ -18854,7 +18874,17 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (typeof window._refreshFinanceAccounts === "function") {
         debouncedSyncRefresh("financeAccounts", window._refreshFinanceAccounts, 300);
       }
-      if (["proprietor-finance-overview", "finance-dash", "proprietor-dash"].includes(window.currentDashboardSubview)) {
+      if ([
+        "proprietor-finance-overview",
+        "finance-dash",
+        "proprietor-dash",
+        "parent-dash",
+        "student-dash",
+        "fee-ledger",
+        "payroll-engine",
+        "finance-accounts",
+        "finance-p-l"
+      ].includes(window.currentDashboardSubview)) {
         refreshCurrentDashboardView(350);
       }
     }
@@ -18867,7 +18897,14 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (typeof window._refreshAttendanceTracker === "function") {
         debouncedSyncRefresh("attTracker", window._refreshAttendanceTracker, 300);
       }
-      if (["headteacher-dash", "teacher-dash", "proprietor-dash"].includes(window.currentDashboardSubview)) {
+      if ([
+        "headteacher-dash",
+        "teacher-dash",
+        "proprietor-dash",
+        "student-dash",
+        "parent-dash",
+        "teacher-attendance"
+      ].includes(window.currentDashboardSubview)) {
         refreshCurrentDashboardView(350);
       }
     }
@@ -18877,7 +18914,14 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (typeof window._refreshTeacherGrading === "function") {
         debouncedSyncRefresh("teacherGrading", window._refreshTeacherGrading, 350);
       }
-      if (["proprietor-academic-overview", "headteacher-dash", "student-dash", "parent-dash"].includes(window.currentDashboardSubview)) {
+      if ([
+        "proprietor-academic-overview",
+        "headteacher-dash",
+        "student-dash",
+        "parent-dash",
+        "teacher-dash",
+        "teacher-grading"
+      ].includes(window.currentDashboardSubview)) {
         refreshCurrentDashboardView(400);
       }
     }
@@ -18896,7 +18940,19 @@ window.addEventListener("dbSyncUpdate", async (e) => {
       if (typeof window._refreshUsersDirectory === "function") {
         debouncedSyncRefresh("usersDir", window._refreshUsersDirectory, 300);
       }
-      if (["proprietor-records-overview", "records-dashboard", "records-management"].includes(window.currentDashboardSubview)) {
+      if ([
+        "proprietor-records-overview",
+        "records-dashboard",
+        "records-management",
+        "student-dash",
+        "parent-dash",
+        "teacher-dash",
+        "teacher-attendance",
+        "teacher-grading",
+        "fee-ledger",
+        "proprietor-finance-overview",
+        "proprietor-academic-overview"
+      ].includes(window.currentDashboardSubview)) {
         refreshCurrentDashboardView(400);
       }
     }
@@ -18905,6 +18961,13 @@ window.addEventListener("dbSyncUpdate", async (e) => {
     if (storeName === "lesson_notes") {
       if (typeof window._refreshLessonApprovals === "function") {
         debouncedSyncRefresh("lessonApprovals", window._refreshLessonApprovals, 300);
+      }
+    }
+
+    // 14. Live Parent-Student Relations & Parent Profiles
+    if (storeName === "parent_student_relations" || storeName === "parent_profiles") {
+      if (["parent-dash", "records-management", "records-dashboard", "proprietor-records-overview"].includes(window.currentDashboardSubview)) {
+        refreshCurrentDashboardView(400);
       }
     }
   } catch (syncErr) {
