@@ -14329,9 +14329,9 @@ async function renderFinanceAccounts(container) {
                   <option value="Other Incomes">Other Income Sources</option>
                 </select>
               </div>
-              <div class="form-group portal-hidden" id="inc-custom-type-group">
-                <label class="form-label">Specific Income Type / Source <span style="color:var(--accent-danger);">*</span></label>
-                <input type="text" id="inc-custom-type" class="form-control" placeholder="e.g. Hall Rental, Graduation Gown, Certificate Fee">
+              <div class="form-group" id="inc-custom-type-group">
+                <label class="form-label">Specific Income Type / Description</label>
+                <input type="text" id="inc-custom-type" class="form-control" placeholder="e.g. Hall Rental, Graduation Gown, Certificate Fee, Library Levies">
               </div>
               <div class="horizontal-paired-form">
                 <div class="form-group">
@@ -14373,6 +14373,7 @@ async function renderFinanceAccounts(container) {
                     <th>Method</th>
                     <th>Reference</th>
                     <th>Amount</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="inc-table-body">
@@ -14399,9 +14400,9 @@ async function renderFinanceAccounts(container) {
                   <option value="Other Operational Expenses">Other Operational Expenses</option>
                 </select>
               </div>
-              <div class="form-group portal-hidden" id="exp-custom-type-group">
-                <label class="form-label">Specific Expense Type / Description <span style="color:var(--accent-danger);">*</span></label>
-                <input type="text" id="exp-custom-type" class="form-control" placeholder="e.g. Generator Servicing, Sports Equipment, First Aid Refill">
+              <div class="form-group" id="exp-custom-type-group">
+                <label class="form-label">Specific Expense Type / Description</label>
+                <input type="text" id="exp-custom-type" class="form-control" placeholder="e.g. Generator Servicing, Sports Equipment, Compound Cleaning, First Aid Refill">
               </div>
               <div class="horizontal-paired-form">
                 <div class="form-group">
@@ -14443,6 +14444,7 @@ async function renderFinanceAccounts(container) {
                     <th>Method</th>
                     <th>Reference</th>
                     <th>Amount</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="exp-table-body">
@@ -14644,6 +14646,17 @@ async function renderFinanceAccounts(container) {
     tabPayBtn.onclick = () => { hideAllTabs(); tabPayBtn.className = "btn btn-primary"; payContent.classList.remove("portal-hidden"); loadPayables(); };
     tabReconBtn.onclick = () => { hideAllTabs(); tabReconBtn.className = "btn btn-primary"; reconContent.classList.remove("portal-hidden"); loadRecons(); };
 
+    async function refreshFinanceAccountsMetrics() {
+      try {
+        const freshTxs = await window.db.getAll("financial_transactions") || [];
+        const freshSummary = window.api.getFinancialMetrics(freshTxs, "all");
+        const bookBalLabel = document.getElementById("book-balance-label");
+        if (bookBalLabel) {
+          bookBalLabel.innerText = `GH¢ ${freshSummary.netCash.toFixed(2)}`;
+        }
+      } catch (e) {}
+    }
+
     async function loadIncomes() {
       const txs = await window.db.getAll("financial_transactions");
       const list = txs.filter(t => t.type === "OTHER_INCOME").sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -14655,8 +14668,36 @@ async function renderFinanceAccounts(container) {
           <td><span class="badge badge-info">${item.payment_method}</span></td>
           <td>${item.reference_no}</td>
           <td style="color:var(--accent-success)"><strong>GH¢ ${item.amount.toFixed(2)}</strong></td>
+          <td>
+            <button class="btn btn-secondary btn-del-income" data-id="${item.transaction_id}" data-ref="${item.reference_no || 'N/A'}" data-amt="${item.amount.toFixed(2)}" style="min-height:24px; padding:0 0.5rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this income entry">🗑️ Delete</button>
+          </td>
         </tr>
-      `).join("") || `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">No other incomes recorded yet.</td></tr>`;
+      `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No other incomes recorded yet.</td></tr>`;
+
+      document.getElementById("inc-table-body").querySelectorAll(".btn-del-income").forEach(btn => {
+        btn.onclick = async () => {
+          const id = btn.getAttribute("data-id");
+          const ref = btn.getAttribute("data-ref");
+          const amt = btn.getAttribute("data-amt");
+          if (!confirm(`Are you sure you want to permanently delete this income entry (${ref}) of GH¢ ${amt}?`)) {
+            return;
+          }
+          try {
+            await window.db.deleteLocal("financial_transactions", id);
+            if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+              try {
+                firebase.firestore().collection("financial_transactions").doc(id).delete().catch(() => {});
+              } catch (e) {}
+            }
+            showToast(`Income entry (${ref}) deleted successfully.`, "success");
+            loadIncomes();
+            refreshFinanceAccountsMetrics();
+          } catch (err) {
+            console.error("Error deleting income entry:", err);
+            showToast("Failed to delete income entry: " + err.message, "danger");
+          }
+        };
+      });
     }
 
     async function loadExpenses() {
@@ -14670,8 +14711,36 @@ async function renderFinanceAccounts(container) {
           <td><span class="badge badge-info">${item.payment_method}</span></td>
           <td>${item.reference_no}</td>
           <td style="color:var(--accent-danger)"><strong>GH¢ ${item.amount.toFixed(2)}</strong></td>
+          <td>
+            <button class="btn btn-secondary btn-del-expense" data-id="${item.transaction_id}" data-ref="${item.reference_no || 'N/A'}" data-amt="${item.amount.toFixed(2)}" style="min-height:24px; padding:0 0.5rem; font-size:0.75rem; color:var(--accent-danger); border-color:var(--accent-danger); background:rgba(239,68,68,0.06);" title="Delete this expense entry">🗑️ Delete</button>
+          </td>
         </tr>
-      `).join("") || `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">No other expenses recorded yet.</td></tr>`;
+      `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No other expenses recorded yet.</td></tr>`;
+
+      document.getElementById("exp-table-body").querySelectorAll(".btn-del-expense").forEach(btn => {
+        btn.onclick = async () => {
+          const id = btn.getAttribute("data-id");
+          const ref = btn.getAttribute("data-ref");
+          const amt = btn.getAttribute("data-amt");
+          if (!confirm(`Are you sure you want to permanently delete this expense entry (${ref}) of GH¢ ${amt}?`)) {
+            return;
+          }
+          try {
+            await window.db.deleteLocal("financial_transactions", id);
+            if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+              try {
+                firebase.firestore().collection("financial_transactions").doc(id).delete().catch(() => {});
+              } catch (e) {}
+            }
+            showToast(`Expense entry (${ref}) deleted successfully.`, "success");
+            loadExpenses();
+            refreshFinanceAccountsMetrics();
+          } catch (err) {
+            console.error("Error deleting expense entry:", err);
+            showToast("Failed to delete expense entry: " + err.message, "danger");
+          }
+        };
+      });
     }
 
     async function loadReceivables() {
@@ -14782,20 +14851,20 @@ async function renderFinanceAccounts(container) {
       `).join("") || `<tr><td colspan="7" style="text-align:center; color:var(--text-muted)">No bank reconciliations logged yet.</td></tr>`;
     }
 
-    // Dynamic text box handlers for "Other Income Sources" and "Other Operational Expenses"
+    // Text box handlers for specific income/expense descriptions
     const incCategorySelect = document.getElementById("inc-category");
     const incCustomGroup = document.getElementById("inc-custom-type-group");
     const incCustomInput = document.getElementById("inc-custom-type");
 
     function updateIncCustomVisibility() {
       if (!incCategorySelect || !incCustomGroup || !incCustomInput) return;
+      incCustomGroup.classList.remove("portal-hidden");
       if (incCategorySelect.value === "Other Incomes") {
-        incCustomGroup.classList.remove("portal-hidden");
         incCustomInput.required = true;
+        incCustomInput.placeholder = "e.g. Hall Rental, Graduation Gown, Certificate Fee, Library Levies";
       } else {
-        incCustomGroup.classList.add("portal-hidden");
         incCustomInput.required = false;
-        incCustomInput.value = "";
+        incCustomInput.placeholder = `e.g. Specific details / item description for ${incCategorySelect.value}`;
       }
     }
 
@@ -14806,6 +14875,7 @@ async function renderFinanceAccounts(container) {
           incCustomInput.focus();
         }
       });
+      updateIncCustomVisibility();
     }
 
     const expCategorySelect = document.getElementById("exp-category");
@@ -14814,13 +14884,13 @@ async function renderFinanceAccounts(container) {
 
     function updateExpCustomVisibility() {
       if (!expCategorySelect || !expCustomGroup || !expCustomInput) return;
+      expCustomGroup.classList.remove("portal-hidden");
       if (expCategorySelect.value === "Other Operational Expenses") {
-        expCustomGroup.classList.remove("portal-hidden");
         expCustomInput.required = true;
+        expCustomInput.placeholder = "e.g. Generator Servicing, Compound Cleaning, First Aid Refill, Sports Equipment";
       } else {
-        expCustomGroup.classList.add("portal-hidden");
         expCustomInput.required = false;
-        expCustomInput.value = "";
+        expCustomInput.placeholder = `e.g. Specific details / item description for ${expCategorySelect.value}`;
       }
     }
 
@@ -14831,6 +14901,7 @@ async function renderFinanceAccounts(container) {
           expCustomInput.focus();
         }
       });
+      updateExpCustomVisibility();
     }
 
     document.getElementById("form-add-income").onsubmit = async (e) => {
@@ -14859,7 +14930,10 @@ async function renderFinanceAccounts(container) {
         return;
       }
 
-      const billingDesc = (category === "Other Incomes" && customType) ? `Other Incomes - ${customType}` : category;
+      let billingDesc = category;
+      if (customType) {
+        billingDesc = (category === "Other Incomes") ? `Other Incomes - ${customType}` : `${category} - ${customType}`;
+      }
 
       try {
         const txId = "t-income-" + Date.now();
@@ -14881,6 +14955,7 @@ async function renderFinanceAccounts(container) {
         document.getElementById("form-add-income").reset();
         updateIncCustomVisibility();
         loadIncomes();
+        refreshFinanceAccountsMetrics();
       } catch (err) {
         showToast("Error saving income transaction", "danger");
       } finally {
@@ -14917,7 +14992,10 @@ async function renderFinanceAccounts(container) {
         return;
       }
 
-      const billingDesc = (category === "Other Operational Expenses" && customType) ? `Other Operational Expenses - ${customType}` : category;
+      let billingDesc = category;
+      if (customType) {
+        billingDesc = (category === "Other Operational Expenses") ? `Other Operational Expenses - ${customType}` : `${category} - ${customType}`;
+      }
 
       try {
         const txId = "t-expense-" + Date.now();
@@ -14939,6 +15017,7 @@ async function renderFinanceAccounts(container) {
         document.getElementById("form-add-expense").reset();
         updateExpCustomVisibility();
         loadExpenses();
+        refreshFinanceAccountsMetrics();
       } catch (err) {
         showToast("Error saving expense transaction", "danger");
       } finally {
