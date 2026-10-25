@@ -114,6 +114,36 @@ function getEduClassRank(className) {
   return 100;
 }
 
+function getPayrollMonthLabel(periodStr) {
+  if (!periodStr) return "N/A";
+  const parts = String(periodStr).split("-");
+  if (parts.length >= 2) {
+    const yr = parseInt(parts[0], 10);
+    const mo = parseInt(parts[1], 10);
+    if (!isNaN(yr) && !isNaN(mo)) {
+      const d = new Date(yr, mo - 1, 1);
+      return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+    }
+  }
+  return String(periodStr);
+}
+
+function buildPayrollMonthOptions(selectedPeriod) {
+  const options = [];
+  const currentYear = new Date().getFullYear() || 2026;
+  for (let y = currentYear + 1; y >= 2025; y--) {
+    for (let m = 12; m >= 1; m--) {
+      const mStr = m < 10 ? "0" + m : "" + m;
+      const period = `${y}-${mStr}`;
+      const d = new Date(y, m - 1, 1);
+      const label = d.toLocaleString("en-US", { month: "long", year: "numeric" });
+      const isSel = period === selectedPeriod ? "selected" : "";
+      options.push(`<option value="${period}" ${isSel}>${label}</option>`);
+    }
+  }
+  return options.join("");
+}
+
 function getStaffSection(user, profile, classes) {
   if (!user) return "N/A";
   if (user.role === "Teacher" || user.role === "SectionalHead") {
@@ -1471,13 +1501,7 @@ async function renderProprietorPayrollTab(container) {
             <div style="display:flex; align-items:center; gap:0.5rem;">
               <label class="form-label" style="margin:0; white-space:nowrap;">Select Pay Period:</label>
               <select id="payroll-history-month-select" class="form-control" style="width:180px; min-height:38px;">
-                <option value="2026-07" selected>July 2026</option>
-                <option value="2026-06">June 2026</option>
-                <option value="2026-05">May 2026</option>
-                <option value="2026-04">April 2026</option>
-                <option value="2026-03">March 2026</option>
-                <option value="2026-02">February 2026</option>
-                <option value="2026-01">January 2026</option>
+                ${buildPayrollMonthOptions("2026-07")}
               </select>
             </div>
           </div>
@@ -1519,7 +1543,11 @@ async function renderProprietorPayrollTab(container) {
     async function loadPayrollHistory() {
       const selectedPeriod = historyMonthSelect.value;
       const txs = await window.db.getAll("financial_transactions");
-      const historyTxs = txs.filter(t => t.type === "PAYROLL" && t.timestamp.startsWith(selectedPeriod));
+      const historyTxs = txs.filter(t => t.type === "PAYROLL" && (
+        (t.pay_period && t.pay_period === selectedPeriod) ||
+        (t.reference_no && (t.reference_no.includes(`PAY-${selectedPeriod}-`) || t.reference_no.includes(selectedPeriod))) ||
+        (t.timestamp && t.timestamp.startsWith(selectedPeriod))
+      ));
 
       if (historyTxs.length === 0) {
         historyRosterBody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:1.5rem; color:var(--text-muted)">No finalized payroll records found for pay period ${selectedPeriod}.</td></tr>`;
@@ -8064,18 +8092,27 @@ async function renderPayrollEngine(container) {
       window.payrollAdjustments = {};
     }
 
+    const defaultActivePeriod = new Date().toISOString().substring(0, 7);
+    const defaultActiveMonthLabel = getPayrollMonthLabel(defaultActivePeriod);
+
     container.innerHTML = `
       <div id="payroll-engine-export-container" style="display:flex; flex-direction:column; gap:2rem;">
         <!-- ACTIVE MONTHLY PAYROLL PROCESSING -->
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
             <div>
-              <h2>Institutional Payroll Processing (August 2026)</h2>
+              <h2 id="payroll-active-heading">Institutional Payroll Processing (${defaultActiveMonthLabel})</h2>
               <p style="color:var(--text-secondary); font-size:0.85rem;">Itemize salaries, apply custom adjustments (Add/Sub), and process progressive PAYE/SSNIT taxes</p>
             </div>
-            <div style="display:flex; gap:0.5rem; align-items:center;">
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+              <div style="display:flex; align-items:center; gap:0.4rem;">
+                <label for="payroll-active-month-select" class="form-label" style="margin:0; font-weight:600; font-size:0.85rem; white-space:nowrap;">Pay Month:</label>
+                <select id="payroll-active-month-select" class="form-control" style="width:175px; min-height:38px;">
+                  ${buildPayrollMonthOptions(defaultActivePeriod)}
+                </select>
+              </div>
               <button id="btn-export-payroll-engine-pdf" class="btn btn-primary" style="min-height:38px;">Export to PDF</button>
-              <button id="btn-process-payroll-batch" class="btn btn-primary">Process August 2026 Payroll</button>
+              <button id="btn-process-payroll-batch" class="btn btn-primary">Process ${defaultActiveMonthLabel} Payroll</button>
             </div>
           </div>
 
@@ -8113,13 +8150,7 @@ async function renderPayrollEngine(container) {
             <div style="display:flex; align-items:center; gap:0.5rem;">
               <label class="form-label" style="margin:0; white-space:nowrap;">Select Pay Period:</label>
               <select id="payroll-history-month-select" class="form-control" style="width:180px; min-height:38px;">
-                <option value="2026-07" selected>July 2026</option>
-                <option value="2026-06">June 2026</option>
-                <option value="2026-05">May 2026</option>
-                <option value="2026-04">April 2026</option>
-                <option value="2026-03">March 2026</option>
-                <option value="2026-02">February 2026</option>
-                <option value="2026-01">January 2026</option>
+                ${buildPayrollMonthOptions("2026-07")}
               </select>
             </div>
           </div>
@@ -8188,23 +8219,35 @@ async function renderPayrollEngine(container) {
     const rosterBody = document.getElementById("payroll-roster-rows");
     const historyRosterBody = document.getElementById("payroll-history-roster-rows");
     const historyMonthSelect = document.getElementById("payroll-history-month-select");
+    const activeMonthSelect = document.getElementById("payroll-active-month-select");
+    const activeHeading = document.getElementById("payroll-active-heading");
     const processBtn = document.getElementById("btn-process-payroll-batch");
 
-    // Load active payroll (August 2026)
+    // Load active payroll based on selected month
     async function loadActivePayroll() {
-      const activePeriod = "2026-08";
+      const activePeriod = activeMonthSelect ? activeMonthSelect.value : defaultActivePeriod;
+      const activeMonthLabel = getPayrollMonthLabel(activePeriod);
+
+      if (activeHeading) {
+        activeHeading.innerText = `Institutional Payroll Processing (${activeMonthLabel})`;
+      }
+
       const txs = await window.db.getAll("financial_transactions");
 
-      const processedTxs = txs.filter(t => t.type === "PAYROLL" && t.timestamp.startsWith(activePeriod));
+      const processedTxs = txs.filter(t => t.type === "PAYROLL" && (
+        (t.pay_period && t.pay_period === activePeriod) ||
+        (t.reference_no && (t.reference_no.includes(`PAY-${activePeriod}-`) || t.reference_no.includes(activePeriod))) ||
+        (t.timestamp && t.timestamp.startsWith(activePeriod))
+      ));
       const hasProcessed = processedTxs.length > 0;
 
       if (hasProcessed) {
         processBtn.disabled = true;
-        processBtn.innerText = "Payroll Finalized";
+        processBtn.innerText = `Payroll Finalized (${activeMonthLabel})`;
         processBtn.style.opacity = "0.6";
 
         rosterBody.innerHTML = staff.map(member => {
-          const matchingTx = processedTxs.find(t => t.reference_no.includes(member.uid));
+          const matchingTx = processedTxs.find(t => t.reference_no && t.reference_no.includes(member.uid));
           const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
           const paidAmount = matchingTx ? matchingTx.amount : 0;
           const basePayroll = window.api.calculatePayroll(profile.base_salary, profile.allowances);
@@ -8235,12 +8278,13 @@ async function renderPayrollEngine(container) {
         }).join("");
       } else {
         processBtn.disabled = false;
-        processBtn.innerText = "Process August 2026 Payroll";
+        processBtn.innerText = `Process ${activeMonthLabel} Payroll`;
         processBtn.style.opacity = "1";
 
         rosterBody.innerHTML = staff.map(member => {
           const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
-          const adj = window.payrollAdjustments[member.user_id] || { bonus: 0, advance: 0, narration: "" };
+          const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[activePeriod]) || {};
+          const adj = periodAdjustments[member.user_id] || (window.payrollAdjustments && window.payrollAdjustments[member.user_id]) || { bonus: 0, advance: 0, narration: "" };
           const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
 
           const tClasses = classes.filter(c => c.class_teacher_id === member.user_id);
@@ -8278,7 +8322,8 @@ async function renderPayrollEngine(container) {
           btn.onclick = () => {
             const staffId = btn.getAttribute("data-id");
             const staffName = btn.getAttribute("data-name");
-            const adj = window.payrollAdjustments[staffId] || { bonus: 0, advance: 0, narration: "" };
+            const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[activePeriod]) || {};
+            const adj = periodAdjustments[staffId] || (window.payrollAdjustments && window.payrollAdjustments[staffId]) || { bonus: 0, advance: 0, narration: "" };
 
             document.getElementById("adj-staff-id").value = staffId;
             document.getElementById("adj-staff-name").value = staffName;
@@ -8296,25 +8341,33 @@ async function renderPayrollEngine(container) {
         btn.onclick = () => {
           const id = btn.getAttribute("data-id");
           const historicalAmt = btn.getAttribute("data-processed-amt");
-          showPayslipModal(id, historicalAmt ? parseFloat(historicalAmt) : null, "2026-08");
+          showPayslipModal(id, historicalAmt ? parseFloat(historicalAmt) : null, activePeriod);
         };
       });
     }
 
-    // Load payroll history for selected past month (Jan 2026 - July 2026)
+    if (activeMonthSelect) {
+      activeMonthSelect.addEventListener("change", loadActivePayroll);
+    }
+
+    // Load payroll history for selected past month
     async function loadPayrollHistory() {
-      const selectedPeriod = historyMonthSelect.value;
+      const selectedPeriod = historyMonthSelect ? historyMonthSelect.value : "2026-07";
       const txs = await window.db.getAll("financial_transactions");
 
-      const historyTxs = txs.filter(t => t.type === "PAYROLL" && t.timestamp.startsWith(selectedPeriod));
+      const historyTxs = txs.filter(t => t.type === "PAYROLL" && (
+        (t.pay_period && t.pay_period === selectedPeriod) ||
+        (t.reference_no && (t.reference_no.includes(`PAY-${selectedPeriod}-`) || t.reference_no.includes(selectedPeriod))) ||
+        (t.timestamp && t.timestamp.startsWith(selectedPeriod))
+      ));
 
       if (historyTxs.length === 0) {
-        historyRosterBody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:1.5rem; color:var(--text-muted)">No finalized payroll records found for pay period ${selectedPeriod}.</td></tr>`;
+        historyRosterBody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:1.5rem; color:var(--text-muted)">No finalized payroll records found for pay period ${getPayrollMonthLabel(selectedPeriod)} (${selectedPeriod}).</td></tr>`;
         return;
       }
 
       historyRosterBody.innerHTML = staff.map(member => {
-        const matchingTx = historyTxs.find(t => t.reference_no.includes(member.uid));
+        const matchingTx = historyTxs.find(t => t.reference_no && t.reference_no.includes(member.uid));
         const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
         const paidAmount = matchingTx ? matchingTx.amount : 0;
         const basePayroll = window.api.calculatePayroll(profile.base_salary, profile.allowances);
@@ -8331,7 +8384,7 @@ async function renderPayrollEngine(container) {
             <td>GH¢ ${basePayroll.paye.toFixed(2)}</td>
             <td><strong style="color:var(--accent-success)">GH¢ ${paidAmount.toFixed(2)}</strong></td>
             <td>
-              <button class="btn btn-secondary btn-view-history-payslip" data-id="' + member.user_id + '" data-processed-amt="${paidAmount}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">View Slip</button>
+              <button class="btn btn-secondary btn-view-history-payslip" data-id="${member.user_id}" data-processed-amt="${paidAmount}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">View Slip</button>
             </td>
           </tr>
         `;
@@ -8355,7 +8408,11 @@ async function renderPayrollEngine(container) {
       const bonus = parseFloat(document.getElementById("adj-bonus").value) || 0;
       const advance = parseFloat(document.getElementById("adj-advance").value) || 0;
       const narration = document.getElementById("adj-narration").value || "";
+      const activePeriod = activeMonthSelect ? activeMonthSelect.value : defaultActivePeriod;
 
+      if (!window.payrollAdjustments) window.payrollAdjustments = {};
+      if (!window.payrollAdjustments[activePeriod]) window.payrollAdjustments[activePeriod] = {};
+      window.payrollAdjustments[activePeriod][staffId] = { bonus, advance, narration };
       window.payrollAdjustments[staffId] = { bonus, advance, narration };
 
       document.getElementById("adjust-salary-modal").classList.add("portal-hidden");
@@ -8370,12 +8427,13 @@ async function renderPayrollEngine(container) {
     });
 
     // Detailed Payslip Modal Advice
-    async function showPayslipModal(userId, historicalAmt = null, selectedPeriod = "2026-08") {
+    async function showPayslipModal(userId, historicalAmt = null, selectedPeriod = defaultActivePeriod) {
       const modal = document.getElementById("payslip-modal");
       const content = document.getElementById("payslip-modal-content");
       
       const member = await window.db.get("users", userId);
       const profile = profiles.find(p => p.user_id === userId) || { base_salary: 0, allowances: 0 };
+      const periodLabel = getPayrollMonthLabel(selectedPeriod);
 
       let payroll;
       let adj = { bonus: 0, advance: 0, narration: "" };
@@ -8384,7 +8442,8 @@ async function renderPayrollEngine(container) {
         payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances);
         payroll.netPay = historicalAmt;
       } else {
-        adj = window.payrollAdjustments[userId] || { bonus: 0, advance: 0, narration: "" };
+        const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[selectedPeriod]) || {};
+        adj = periodAdjustments[userId] || (window.payrollAdjustments && window.payrollAdjustments[userId]) || { bonus: 0, advance: 0, narration: "" };
         payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
       }
 
@@ -8406,7 +8465,7 @@ async function renderPayrollEngine(container) {
           </div>
           <div style="text-align:right;">
             <div><strong>Advice Date:</strong> ${new Date().toLocaleDateString()}</div>
-            <div><strong>Pay Period:</strong> ${selectedPeriod}</div>
+            <div><strong>Pay Period:</strong> ${periodLabel}</div>
           </div>
         </div>
 
@@ -8486,8 +8545,10 @@ async function renderPayrollEngine(container) {
 
     // Process active batch
     processBtn.addEventListener("click", async () => {
-      const activePeriod = "2026-08";
-      if (!confirm(`Proceed to finalize and post payroll Net payouts to ledger and dispatch SMS slip alerts for pay period: ${activePeriod}?`)) {
+      const activePeriod = activeMonthSelect ? activeMonthSelect.value : defaultActivePeriod;
+      const activeMonthLabel = getPayrollMonthLabel(activePeriod);
+
+      if (!confirm(`Proceed to finalize and post payroll Net payouts to ledger and dispatch SMS slip alerts for pay period: ${activeMonthLabel} (${activePeriod})?`)) {
         return;
       }
 
@@ -8501,10 +8562,12 @@ async function renderPayrollEngine(container) {
 
         for (const member of staff) {
           const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
-          const adj = window.payrollAdjustments[member.user_id] || { bonus: 0, advance: 0, narration: "" };
+          const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[activePeriod]) || {};
+          const adj = periodAdjustments[member.user_id] || (window.payrollAdjustments && window.payrollAdjustments[member.user_id]) || { bonus: 0, advance: 0, narration: "" };
           const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
           
           const txId = `t-payroll-batch-${member.user_id}-${Date.now()}`;
+          const nowIso = new Date().toISOString();
           const record = {
             transaction_id: txId,
             student_id: null,
@@ -8512,8 +8575,10 @@ async function renderPayrollEngine(container) {
             amount: payroll.netPay,
             payment_method: "BANK_TRANSFER",
             reference_no: `PAY-${activePeriod}-${member.uid}`,
+            pay_period: activePeriod,
+            billing_description: `Staff Payroll: ${activeMonthLabel}`,
             recorded_by: currentUser.user_id,
-            timestamp: new Date().toISOString()
+            timestamp: nowIso
           };
 
           await window.db.put("financial_transactions", record);
@@ -8524,11 +8589,12 @@ async function renderPayrollEngine(container) {
 
           await window.db.put("audit_logs", {
             audit_id: "a-audit-" + Date.now(),
-            timestamp: new Date().toISOString(),
+            timestamp: nowIso,
             action_details: JSON.stringify({
               action: "PROCESS_PAYROLL",
               recorded_by: currentUser.uid,
               staff: member.uid,
+              period: activePeriod,
               amount: payroll.netPay,
               bonus: adj.bonus,
               advance: adj.advance,
@@ -8537,14 +8603,15 @@ async function renderPayrollEngine(container) {
             })
           });
 
-          window.api.simulateSMS(member.phone, `Hello ${member.first_name}, your Net salary payout of GH¢ ${payroll.netPay.toFixed(2)} for ${activePeriod} has been deposited. Check your payslip advice on your portal. Thank you.`);
+          window.api.simulateSMS(member.phone, `Hello ${member.first_name}, your Net salary payout of GH¢ ${payroll.netPay.toFixed(2)} for ${activeMonthLabel} has been deposited. Check your payslip advice on your portal. Thank you.`);
           
           expenseSum += payroll.netPay;
           count++;
         }
 
-        showToast(`Payroll processed successfully for ${count} staff members. Total Net: GHS ${expenseSum.toFixed(2)}`, "success");
+        showToast(`Payroll processed successfully for ${count} staff members for ${activeMonthLabel}. Total Net: GHS ${expenseSum.toFixed(2)}`, "success");
         loadActivePayroll();
+        loadPayrollHistory();
       } catch (err) {
         console.error("Error processing payroll:", err);
         showToast("Error processing payroll: " + (err.message || err), "error");
@@ -8557,7 +8624,9 @@ async function renderPayrollEngine(container) {
     const pdfBtn = document.getElementById("btn-export-payroll-engine-pdf");
     if (pdfBtn) {
       pdfBtn.onclick = () => {
-        exportElementToPDF("payroll-engine-export-container", "Institutional Payroll Processing Ledger");
+        const activePeriod = activeMonthSelect ? activeMonthSelect.value : defaultActivePeriod;
+        const activeMonthLabel = getPayrollMonthLabel(activePeriod);
+        exportElementToPDF("payroll-engine-export-container", `Institutional Payroll Processing Ledger - ${activeMonthLabel}`);
       };
     }
 
@@ -9021,7 +9090,14 @@ async function renderFinancialAudit(container) {
 async function renderTeacherPayslip(container) {
   try {
     const profile = (await window.db.getAll("profiles")).find(p => p.user_id === currentUser.user_id) || { base_salary: 0, allowances: 0 };
+    const myTxs = (await window.db.getAll("financial_transactions")).filter(t => t.type === "PAYROLL" && t.reference_no && t.reference_no.includes(currentUser.uid)).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const latestPeriod = (myTxs.length > 0 && myTxs[0].pay_period) || (myTxs.length > 0 && myTxs[0].timestamp ? myTxs[0].timestamp.substring(0, 7) : new Date().toISOString().substring(0, 7));
+    const payMonthLabel = getPayrollMonthLabel(latestPeriod);
+
     const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances);
+    if (myTxs.length > 0 && myTxs[0].amount) {
+      payroll.netPay = myTxs[0].amount;
+    }
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
@@ -9044,7 +9120,7 @@ async function renderTeacherPayslip(container) {
               <div><strong>Staff ID:</strong> ${currentUser.uid}</div>
             </div>
             <div style="text-align:right;">
-              <div><strong>Pay Month:</strong> August 2026</div>
+              <div><strong>Pay Month:</strong> ${payMonthLabel}</div>
               <div><strong>Printed:</strong> ${new Date().toLocaleDateString()}</div>
             </div>
           </div>
@@ -18208,7 +18284,8 @@ async function openPersonalProfileModal() {
     if (btnCurrentPayslip) {
       btnCurrentPayslip.onclick = () => {
         modal.classList.add("portal-hidden");
-        showPayslipModalForSelf(currentUser.user_id, null, "August 2026");
+        const currentPrd = new Date().toISOString().substring(0, 7);
+        showPayslipModalForSelf(currentUser.user_id, null, currentPrd);
       };
     }
   } else {
@@ -18218,9 +18295,11 @@ async function openPersonalProfileModal() {
   modal.classList.remove("portal-hidden");
 }
 
-async function showPayslipModalForSelf(userId, historicalAmt = null, selectedPeriod = "2026-08") {
+async function showPayslipModalForSelf(userId, historicalAmt = null, selectedPeriod = null) {
   const modal = document.getElementById("payslip-modal");
   const content = document.getElementById("payslip-modal-content");
+  const period = selectedPeriod || new Date().toISOString().substring(0, 7);
+  const periodLabel = getPayrollMonthLabel(period);
   
   const member = await window.db.get("users", userId);
   const profiles = await window.db.getAll("profiles");
@@ -18249,7 +18328,7 @@ async function showPayslipModalForSelf(userId, historicalAmt = null, selectedPer
       </div>
       <div style="text-align:right;">
         <div><strong>Advice Date:</strong> ${new Date().toLocaleDateString()}</div>
-        <div><strong>Pay Period:</strong> ${selectedPeriod}</div>
+        <div><strong>Pay Period:</strong> ${periodLabel}</div>
       </div>
     </div>
 
