@@ -8087,6 +8087,66 @@ async function renderPayrollEngine(container) {
 
     const staff = sortStaffByClassRank(users.filter(u => u.role !== "Student" && u.role !== "Parent" && u.status === "ACTIVE"));
 
+    // Standard institutional fallback base salaries & allowances by staff role
+    function getStandardRoleBaseSalary(member, profile) {
+      if (profile && typeof profile.base_salary === "number" && profile.base_salary > 0) {
+        return profile.base_salary;
+      }
+      const role = (member && member.role) || "";
+      if (role === "Proprietor") return 8000.00;
+      if (role === "Headmaster" || role === "Administrator") return 4000.00;
+      if (role === "Accountant") return 3500.00;
+      if (role === "SectionalHead") return 3000.00;
+      if (role === "Teacher") return 2500.00;
+      if (role === "NonTeachingStaff") return 1800.00;
+      return 2500.00;
+    }
+
+    function getStandardRoleAllowances(member, profile) {
+      if (profile && typeof profile.allowances === "number" && profile.allowances >= 0) {
+        return profile.allowances;
+      }
+      const role = (member && member.role) || "";
+      if (role === "Proprietor") return 1500.00;
+      if (role === "Headmaster" || role === "Administrator") return 500.00;
+      if (role === "Accountant") return 300.00;
+      if (role === "SectionalHead") return 250.00;
+      return 0.00;
+    }
+
+    // Preload & initialize base pay into profile records for all active staff
+    for (const member of staff) {
+      let prof = profiles.find(p => p.user_id === member.user_id);
+      let needsSave = false;
+      if (!prof) {
+        prof = {
+          profile_id: `p-${member.user_id}`,
+          user_id: member.user_id,
+          base_salary: getStandardRoleBaseSalary(member, null),
+          allowances: getStandardRoleAllowances(member, null),
+          photo_url: "",
+          address: "Ghana",
+          created_at: new Date().toISOString()
+        };
+        profiles.push(prof);
+        needsSave = true;
+      } else if (!prof.base_salary || prof.base_salary <= 0) {
+        prof.base_salary = getStandardRoleBaseSalary(member, prof);
+        if (prof.allowances === undefined || prof.allowances === null) {
+          prof.allowances = getStandardRoleAllowances(member, prof);
+        }
+        needsSave = true;
+      }
+      if (needsSave) {
+        window.db.put("profiles", prof).catch(() => {});
+        if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+          try {
+            firebase.firestore().collection("profiles").doc(prof.profile_id).set(prof, { merge: true }).catch(() => {});
+          } catch (e) {}
+        }
+      }
+    }
+
     // Store in-memory salary adjustments for unprocessed periods
     if (!window.payrollAdjustments) {
       window.payrollAdjustments = {};
@@ -8186,25 +8246,37 @@ async function renderPayrollEngine(container) {
 
         <!-- ADJUST SALARY MODAL -->
         <div id="adjust-salary-modal" class="portal-hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000; padding:1rem;">
-          <div class="admissions-box" style="width:100%; max-width:450px; padding:2rem;">
+          <div class="admissions-box" style="width:100%; max-width:480px; padding:2rem;">
             <h3 style="margin-bottom:1.25rem;">Adjust Monthly Pay</h3>
             <form id="form-adjust-salary" style="display:flex; flex-direction:column; gap:1rem;">
               <input type="hidden" id="adj-staff-id">
               <div class="form-group">
                 <label class="form-label">Staff Name</label>
-                <input type="text" id="adj-staff-name" class="form-control" readonly>
+                <input type="text" id="adj-staff-name" class="form-control" readonly style="background:var(--bg-primary); font-weight:600;">
               </div>
-              <div class="form-group">
-                <label class="form-label">Special Addition (Adds to Gross)</label>
-                <input type="number" id="adj-bonus" class="form-control" placeholder="e.g. 200" step="0.01" min="0">
+              <div class="horizontal-paired-form">
+                <div class="form-group">
+                  <label class="form-label">Base Pay / Salary (GHS) <span style="color:var(--accent-primary);">*</span></label>
+                  <input type="number" id="adj-base-salary" class="form-control" placeholder="e.g. 2500.00" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Duty Allowances (GHS)</label>
+                  <input type="number" id="adj-allowance" class="form-control" placeholder="e.g. 300.00" step="0.01" min="0">
+                </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Special Deduction (Subtracted from Net)</label>
-                <input type="number" id="adj-advance" class="form-control" placeholder="e.g. 500" step="0.01" min="0">
+              <div class="horizontal-paired-form">
+                <div class="form-group">
+                  <label class="form-label">Special Addition (Adds to Gross)</label>
+                  <input type="number" id="adj-bonus" class="form-control" placeholder="e.g. 200.00" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Special Deduction (Subtracted from Net)</label>
+                  <input type="number" id="adj-advance" class="form-control" placeholder="e.g. 500.00" step="0.01" min="0">
+                </div>
               </div>
               <div class="form-group">
                 <label class="form-label">Adjustment Narration / Reason</label>
-                <textarea id="adj-narration" class="form-control" placeholder="e.g. Overtime bonus, salary advance loan..." style="min-height:70px;"></textarea>
+                <textarea id="adj-narration" class="form-control" placeholder="e.g. Base pay adjustment, overtime bonus, advance loan..." style="min-height:70px;"></textarea>
               </div>
               <div style="display:flex; gap:1rem; margin-top:1rem;">
                 <button type="submit" class="btn btn-primary" style="flex:1;">Save Adjustments</button>
@@ -8285,7 +8357,9 @@ async function renderPayrollEngine(container) {
           const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
           const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[activePeriod]) || {};
           const adj = periodAdjustments[member.user_id] || (window.payrollAdjustments && window.payrollAdjustments[member.user_id]) || { bonus: 0, advance: 0, narration: "" };
-          const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
+          const effBase = (adj.base_salary !== undefined && adj.base_salary !== null) ? adj.base_salary : profile.base_salary;
+          const effAllowance = (adj.allowances !== undefined && adj.allowances !== null) ? adj.allowances : profile.allowances;
+          const payroll = window.api.calculatePayroll(effBase, effAllowance, adj.bonus, adj.advance);
 
           const tClasses = classes.filter(c => c.class_teacher_id === member.user_id);
           const prof = profiles.find(p => p.user_id === member.user_id) || {};
@@ -8297,8 +8371,8 @@ async function renderPayrollEngine(container) {
               <td><strong>${member.uid}</strong></td>
               <td>${formatFullName(member)}</td>
               <td><span class="badge badge-info">${member.role}</span><br><small style="color:var(--text-secondary); font-size:0.75rem;">${classDesc}</small></td>
-              <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
-              <td>GH¢ ${profile.allowances.toFixed(2)}</td>
+              <td>GH¢ ${effBase.toFixed(2)}</td>
+              <td>GH¢ ${effAllowance.toFixed(2)}</td>
               <td>
                 <div style="font-size:0.75rem; color:var(--text-secondary); line-height:1.4;">
                   Add: <span style="color:var(--accent-success);">+GH¢ ${adj.bonus.toFixed(2)}</span><br>
@@ -8322,11 +8396,16 @@ async function renderPayrollEngine(container) {
           btn.onclick = () => {
             const staffId = btn.getAttribute("data-id");
             const staffName = btn.getAttribute("data-name");
+            const profile = profiles.find(p => p.user_id === staffId) || { base_salary: 0, allowances: 0 };
             const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[activePeriod]) || {};
             const adj = periodAdjustments[staffId] || (window.payrollAdjustments && window.payrollAdjustments[staffId]) || { bonus: 0, advance: 0, narration: "" };
+            const currentBase = (adj.base_salary !== undefined && adj.base_salary !== null) ? adj.base_salary : profile.base_salary;
+            const currentAllowance = (adj.allowances !== undefined && adj.allowances !== null) ? adj.allowances : profile.allowances;
 
             document.getElementById("adj-staff-id").value = staffId;
             document.getElementById("adj-staff-name").value = staffName;
+            document.getElementById("adj-base-salary").value = (currentBase !== undefined && currentBase !== null) ? currentBase : "";
+            document.getElementById("adj-allowance").value = (currentAllowance !== undefined && currentAllowance !== null) ? currentAllowance : "";
             document.getElementById("adj-bonus").value = adj.bonus || "";
             document.getElementById("adj-advance").value = adj.advance || "";
             document.getElementById("adj-narration").value = adj.narration || "";
@@ -8402,22 +8481,51 @@ async function renderPayrollEngine(container) {
     historyMonthSelect.addEventListener("change", loadPayrollHistory);
 
     // Save adjustments handler
-    document.getElementById("form-adjust-salary").addEventListener("submit", (e) => {
+    document.getElementById("form-adjust-salary").addEventListener("submit", async (e) => {
       e.preventDefault();
       const staffId = document.getElementById("adj-staff-id").value;
+      const baseSalary = parseFloat(document.getElementById("adj-base-salary").value) || 0;
+      const allowance = parseFloat(document.getElementById("adj-allowance").value) || 0;
       const bonus = parseFloat(document.getElementById("adj-bonus").value) || 0;
       const advance = parseFloat(document.getElementById("adj-advance").value) || 0;
       const narration = document.getElementById("adj-narration").value || "";
       const activePeriod = activeMonthSelect ? activeMonthSelect.value : defaultActivePeriod;
 
+      // Update profiles cache in memory, in IndexedDB and Firestore
+      let prof = profiles.find(p => p.user_id === staffId);
+      if (!prof) {
+        prof = {
+          profile_id: `p-${staffId}`,
+          user_id: staffId,
+          base_salary: baseSalary,
+          allowances: allowance,
+          photo_url: "",
+          address: "Ghana",
+          created_at: new Date().toISOString()
+        };
+        profiles.push(prof);
+      } else {
+        prof.base_salary = baseSalary;
+        prof.allowances = allowance;
+      }
+
+      await window.db.put("profiles", prof);
+      if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+        try {
+          await firebase.firestore().collection("profiles").doc(prof.profile_id).set(prof, { merge: true });
+        } catch (e) {
+          console.warn("Could not sync updated base salary to Firestore:", e);
+        }
+      }
+
       if (!window.payrollAdjustments) window.payrollAdjustments = {};
       if (!window.payrollAdjustments[activePeriod]) window.payrollAdjustments[activePeriod] = {};
-      window.payrollAdjustments[activePeriod][staffId] = { bonus, advance, narration };
-      window.payrollAdjustments[staffId] = { bonus, advance, narration };
+      window.payrollAdjustments[activePeriod][staffId] = { base_salary: baseSalary, allowances: allowance, bonus, advance, narration };
+      window.payrollAdjustments[staffId] = { base_salary: baseSalary, allowances: allowance, bonus, advance, narration };
 
       document.getElementById("adjust-salary-modal").classList.add("portal-hidden");
       document.getElementById("form-adjust-salary").reset();
-      showToast("Salary adjustments saved successfully", "success");
+      showToast("Salary and adjustments saved successfully", "success");
       loadActivePayroll();
     });
 
@@ -8437,14 +8545,17 @@ async function renderPayrollEngine(container) {
 
       let payroll;
       let adj = { bonus: 0, advance: 0, narration: "" };
+      const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[selectedPeriod]) || {};
+      adj = periodAdjustments[userId] || (window.payrollAdjustments && window.payrollAdjustments[userId]) || { bonus: 0, advance: 0, narration: "" };
+
+      const effBase = (adj.base_salary !== undefined && adj.base_salary !== null) ? adj.base_salary : profile.base_salary;
+      const effAllowance = (adj.allowances !== undefined && adj.allowances !== null) ? adj.allowances : profile.allowances;
 
       if (historicalAmt !== null) {
-        payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances);
+        payroll = window.api.calculatePayroll(effBase, effAllowance);
         payroll.netPay = historicalAmt;
       } else {
-        const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[selectedPeriod]) || {};
-        adj = periodAdjustments[userId] || (window.payrollAdjustments && window.payrollAdjustments[userId]) || { bonus: 0, advance: 0, narration: "" };
-        payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
+        payroll = window.api.calculatePayroll(effBase, effAllowance, adj.bonus, adj.advance);
       }
 
       modal.classList.remove("portal-hidden");
@@ -8480,12 +8591,12 @@ async function renderPayrollEngine(container) {
           <tbody>
             <tr style="border-bottom:1px solid #eee;">
               <td style="padding:0.5rem;">Base Basic Salary</td>
-              <td style="padding:0.5rem; text-align:right;">GH¢ ${profile.base_salary.toFixed(2)}</td>
+              <td style="padding:0.5rem; text-align:right;">GH¢ ${effBase.toFixed(2)}</td>
               <td></td>
             </tr>
             <tr style="border-bottom:1px solid #eee;">
               <td style="padding:0.5rem;">Duty Allowance Allocation</td>
-              <td style="padding:0.5rem; text-align:right;">GH¢ ${profile.allowances.toFixed(2)}</td>
+              <td style="padding:0.5rem; text-align:right;">GH¢ ${effAllowance.toFixed(2)}</td>
               <td></td>
             </tr>
             ${adj.bonus > 0 ? `
@@ -8564,7 +8675,9 @@ async function renderPayrollEngine(container) {
           const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
           const periodAdjustments = (window.payrollAdjustments && window.payrollAdjustments[activePeriod]) || {};
           const adj = periodAdjustments[member.user_id] || (window.payrollAdjustments && window.payrollAdjustments[member.user_id]) || { bonus: 0, advance: 0, narration: "" };
-          const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, adj.bonus, adj.advance);
+          const effBase = (adj.base_salary !== undefined && adj.base_salary !== null) ? adj.base_salary : profile.base_salary;
+          const effAllowance = (adj.allowances !== undefined && adj.allowances !== null) ? adj.allowances : profile.allowances;
+          const payroll = window.api.calculatePayroll(effBase, effAllowance, adj.bonus, adj.advance);
           
           const txId = `t-payroll-batch-${member.user_id}-${Date.now()}`;
           const nowIso = new Date().toISOString();
@@ -8595,6 +8708,8 @@ async function renderPayrollEngine(container) {
               recorded_by: currentUser.uid,
               staff: member.uid,
               period: activePeriod,
+              base_salary: effBase,
+              allowances: effAllowance,
               amount: payroll.netPay,
               bonus: adj.bonus,
               advance: adj.advance,
