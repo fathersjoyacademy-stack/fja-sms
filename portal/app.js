@@ -14890,6 +14890,10 @@ async function renderFinanceAccounts(container) {
                 firebase.firestore().collection("financial_transactions").doc(id).delete().catch(() => {});
               } catch (e) {}
             }
+            if (typeof window.bumpCloudStoreVersion === "function") {
+              window.bumpCloudStoreVersion("financial_transactions").catch(() => {});
+            }
+            window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "financial_transactions" } }));
             showToast(`Income entry (${ref}) deleted successfully.`, "success");
             loadIncomes();
             refreshFinanceAccountsMetrics();
@@ -14933,6 +14937,10 @@ async function renderFinanceAccounts(container) {
                 firebase.firestore().collection("financial_transactions").doc(id).delete().catch(() => {});
               } catch (e) {}
             }
+            if (typeof window.bumpCloudStoreVersion === "function") {
+              window.bumpCloudStoreVersion("financial_transactions").catch(() => {});
+            }
+            window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "financial_transactions" } }));
             showToast(`Expense entry (${ref}) deleted successfully.`, "success");
             loadExpenses();
             refreshFinanceAccountsMetrics();
