@@ -479,6 +479,9 @@ async function syncDirtyRecords() {
             }
           }
         }
+        if (typeof window.bumpCloudStoreVersion === "function") {
+          window.bumpCloudStoreVersion(storeName).catch(() => {});
+        }
         totalSynced += unsynced.length;
       }
     }
@@ -490,6 +493,7 @@ async function syncDirtyRecords() {
     console.error("Generalized offline sync error:", err);
   }
 }
+window.syncDirtyRecords = syncDirtyRecords;
 
 // ==========================================
 // 2. TOAST NOTIFICATION WIDGET             

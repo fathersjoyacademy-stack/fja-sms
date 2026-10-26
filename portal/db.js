@@ -89,6 +89,45 @@ async function checkCleanSlateEpoch() {
 const FEE_CLEAN_SLATE_KEY = "fja_fee_clean_slate_epoch_2026_10_23";
 const FEE_CLEAN_SLATE_TIMESTAMP = "2026-10-23T20:50:00.000Z";
 
+// Cross-Device Sync Parity Epoch
+// Guarantees all devices (Desktop, Mobile, Tablet) re-align to the latest clean cloud catalog
+const SYNC_PARITY_EPOCH = "2026-10-26-parity-v2";
+
+async function checkSyncParityEpoch() {
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fja_sync_parity_epoch") !== SYNC_PARITY_EPOCH) {
+    console.log("Sync parity epoch update. Resetting catalog version trackers to ensure 100% desktop/mobile uniformity...");
+    localStorage.setItem("fja_sync_parity_epoch", SYNC_PARITY_EPOCH);
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith("fja_last_sync_") || k.startsWith("fja_catalog_v_")) {
+        localStorage.removeItem(k);
+      }
+    });
+  }
+}
+
+// Automatic local self-healing: purge any obsolete wrong fee bills (1800 bills or old Oct 24 FEE_PAYMENT invoices)
+async function purgeObsoleteLocalRecords() {
+  try {
+    const allTxs = await db.getAll("financial_transactions") || [];
+    let pruned = 0;
+    for (const tx of allTxs) {
+      const id = String(tx.transaction_id || "");
+      if (id.startsWith("t-bill-") || (id.startsWith("t-invoice-bulk-") && tx.type === "FEE_PAYMENT")) {
+        await db.deleteLocal("financial_transactions", id);
+        pruned++;
+      }
+    }
+    if (pruned > 0) {
+      console.log(`[Self-Healing] Pruned ${pruned} obsolete wrong fee bills from local IndexedDB.`);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName: "financial_transactions" } }));
+      }
+    }
+  } catch (e) {
+    console.warn("purgeObsoleteLocalRecords notice:", e);
+  }
+}
+
 function isStudentFeeTransaction(tx) {
   if (!tx) return false;
   if (tx.type === "PAYROLL" || tx.type === "OTHER_INCOME" || tx.type === "OTHER_EXPENSE" || tx.type === "RECEIVABLE" || tx.type === "PAYABLE") {
@@ -153,6 +192,7 @@ async function initDB() {
   }
 
   await checkCleanSlateEpoch();
+  await checkSyncParityEpoch();
 
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -164,6 +204,7 @@ async function initDB() {
 
     request.onsuccess = (e) => {
       dbInstance = e.target.result;
+      purgeObsoleteLocalRecords().catch(() => {});
       resolve(dbInstance);
     };
 
@@ -2222,12 +2263,10 @@ async function syncStoreDelta(storeName, newCloudVersion) {
       const bufferedSyncTime = (!isNaN(lastSyncMs) && lastSyncMs > 120000)
         ? new Date(lastSyncMs - 120000).toISOString()
         : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      query = query.where("updated_at", ">", bufferedSyncTime).limit(100);
-    } else {
-      // Initial fetch for unsynced device bounded to 100 documents
-      query = query.limit(100);
+      query = query.where("updated_at", ">", bufferedSyncTime);
     }
 
+    // Full collection fetch on initial load; delta fetch on updates
     const snapshot = await query.get();
     if (!snapshot.empty) {
       for (const doc of snapshot.docs) {
@@ -2270,7 +2309,7 @@ async function startFirestoreSync(specificStores = null) {
     return;
   }
 
-  // If already listening to sync_catalog, avoid churning listeners
+  // If already listening to sync_catalog, avoid churning listeners unless specific bootstrap stores requested
   if (isSyncCatalogListenerActive && !specificStores) {
     return;
   }
@@ -2283,7 +2322,13 @@ async function startFirestoreSync(specificStores = null) {
     await ensureFirebaseAuth();
     const firestore = firebase.firestore();
 
+    purgeObsoleteLocalRecords().catch(() => {});
     healDatabaseScoresAndProfiles().catch(() => {});
+
+    // Flush any unsynced offline records from this device
+    if (typeof window.syncDirtyRecords === "function") {
+      window.syncDirtyRecords().catch(() => {});
+    }
 
     // 1. If specificStores requested (e.g. login credentials bootstrap), fetch initial missing records directly
     if (specificStores && Array.isArray(specificStores)) {
@@ -2315,8 +2360,8 @@ async function startFirestoreSync(specificStores = null) {
           const cloudVersion = cloudCatalog[storeName] || 0;
           const localVersion = getLocalStoreVersion(storeName);
 
-          if (cloudVersion > localVersion) {
-            await syncStoreDelta(storeName, cloudVersion);
+          if (cloudVersion > localVersion || !localStorage.getItem(`fja_last_sync_${storeName}`)) {
+            await syncStoreDelta(storeName, cloudVersion || Date.now());
           }
         }
       }, (err) => {
@@ -2438,3 +2483,4 @@ window.ensureFirebaseAuth = ensureFirebaseAuth;
 window.clearAllFirestoreListeners = clearAllFirestoreListeners;
 window.bumpCloudStoreVersion = bumpCloudStoreVersion;
 window.syncStoreDelta = syncStoreDelta;
+window.purgeObsoleteLocalRecords = purgeObsoleteLocalRecords;

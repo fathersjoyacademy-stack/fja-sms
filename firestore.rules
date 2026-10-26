@@ -70,7 +70,7 @@ service cloud.firestore {
     match /financial_transactions/{txId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
-      allow delete: if isPortalMember();
+      allow delete: if isAuthenticated();
     }
     match /attendance/{attendanceId} {
       allow read, write: if isAuthenticated();
@@ -81,7 +81,7 @@ service cloud.firestore {
     match /student_scores/{scoreId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
-      allow delete: if isPortalMember();
+      allow delete: if isAuthenticated();
     }
     match /lesson_notes/{noteId} {
       allow read, write: if isAuthenticated();
