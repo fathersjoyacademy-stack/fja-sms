@@ -6692,13 +6692,14 @@ async function renderAdmissionsIntake(container) {
 // ==========================================
 async function renderFeeLedger(container) {
   try {
-    const users = await window.db.getAll("users");
-    const classes = await window.db.getAll("classes");
-    const enrolments = await window.db.getAll("enrolments");
-    const transactions = await window.db.getAll("financial_transactions");
+    const users = await window.db.getAll("users") || [];
+    const profiles = await window.db.getAll("profiles") || [];
+    const classes = await window.db.getAll("classes") || [];
+    const enrolments = await window.db.getAll("enrolments") || [];
+    const transactions = await window.db.getAll("financial_transactions") || [];
     const currentUser = window.api.getCurrentUser();
 
-    const students = users.filter(u => u.role === "Student" && u.status === "ACTIVE");
+    const students = users.filter(u => u.role === "Student" && (u.status === "ACTIVE" || !u.status || u.status === "active"));
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:2rem;">
@@ -7019,13 +7020,17 @@ async function renderFeeLedger(container) {
 
     async function loadLedgerList() {
       const searchVal = searchInput.value.toLowerCase();
-      const txs = await window.db.getAll("financial_transactions");
+      const txs = await window.db.getAll("financial_transactions") || [];
       const freshUsers = await window.db.getAll("users") || [];
+      const freshProfiles = await window.db.getAll("profiles") || [];
       const freshEnrolments = await window.db.getAll("enrolments") || [];
-      const activeStudents = freshUsers.filter(u => u.role === "Student" && u.status === "ACTIVE");
+      const activeStudents = freshUsers.filter(u => u.role === "Student" && (u.status === "ACTIVE" || !u.status || u.status === "active"));
+      const profileList = freshProfiles.length > 0 ? freshProfiles : profiles;
+      const studentList = activeStudents.length > 0 ? activeStudents : students;
+      const enrolmentList = freshEnrolments.length > 0 ? freshEnrolments : enrolments;
 
       // Update Grand Total KPI Summary Cards
-      const schoolMetrics = window.api.getFinancialMetrics(txs, "all", activeStudents.length > 0 ? activeStudents : students);
+      const schoolMetrics = window.api.getFinancialMetrics(txs, "all", studentList);
       const kpiCardsContainer = document.getElementById("fee-ledger-kpi-cards");
       if (kpiCardsContainer) {
         kpiCardsContainer.innerHTML = `
@@ -7057,15 +7062,12 @@ async function renderFeeLedger(container) {
       const classSortEl = document.getElementById("ledger-class-sort");
       let currentSort = classSortEl ? classSortEl.value : "class-asc";
 
-      const studentList = activeStudents.length > 0 ? activeStudents : students;
-      const enrolmentList = freshEnrolments.length > 0 ? freshEnrolments : enrolments;
-
       let filtered = studentList.filter(s => {
         const fullName = formatFullName(s).toLowerCase();
         const matchesSearch = !searchVal || fullName.includes(searchVal) || (s.uid && s.uid.toLowerCase().includes(searchVal));
         if (!matchesSearch) return false;
 
-        const sClass = getStudentClassInfo(s, enrolmentList, classes, profiles);
+        const sClass = getStudentClassInfo(s, enrolmentList, classes, profileList);
         if (selectedClass === "unassigned") {
           if (sClass.class_id) return false;
         } else if (selectedClass) {
@@ -7076,8 +7078,8 @@ async function renderFeeLedger(container) {
 
       // Sort students (Default is class-asc: Creche → JHS)
       filtered.sort((a, b) => {
-        const classA = getStudentClassInfo(a, enrolments, classes, profiles);
-        const classB = getStudentClassInfo(b, enrolments, classes, profiles);
+        const classA = getStudentClassInfo(a, enrolmentList, classes, profileList);
+        const classB = getStudentClassInfo(b, enrolmentList, classes, profileList);
 
         if (currentSort === "class-asc") {
           const rankA = getEduClassRank(classA.class_name);
@@ -7121,7 +7123,7 @@ async function renderFeeLedger(container) {
         const charged = sFin.totalCharged;
         const paid = sFin.totalPaid;
         const arrears = sFin.netArrears;
-        const classInfo = getStudentClassInfo(s, enrolments, classes, profiles);
+        const classInfo = getStudentClassInfo(s, enrolmentList, classes, profileList);
         const classNameBadge = classInfo.class_name !== "Unassigned" 
           ? `<span class="badge badge-info" style="font-weight:600;">${classInfo.class_name}</span>` 
           : `<span style="color:var(--text-muted); font-size:0.85rem;">Unassigned</span>`;
