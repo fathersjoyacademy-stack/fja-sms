@@ -1152,7 +1152,9 @@ function renderRoleNavigation(role) {
 // ==========================================
 // 8. DASHBOARD VIEWPORT RENDERING & HANDLERS 
 // ==========================================
+window.loadDashboardSubview = loadDashboardSubview;
 async function loadDashboardSubview(subviewId, pushToHistory = true) {
+  window.loadDashboardSubview = loadDashboardSubview;
   const container = document.getElementById("dashboard-subview-container");
   if (!container) return;
 
@@ -2100,7 +2102,7 @@ async function renderProprietorDash(container) {
             showToast("Task completed!", "success");
             
             // Notify assigner (Proprietor) if completed by staff
-            const currentUser = window.api.getCurrentUser();
+            const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
             if (currentUser && currentUser.user_id !== task.assigner_id) {
               const notifId = "notif-" + Date.now();
               await window.db.put("notifications", {
@@ -2167,7 +2169,7 @@ async function renderProprietorDash(container) {
       const assigneeUser = await window.db.get("users", assigneeId);
       const assigneeName = assigneeUser ? formatFullName(assigneeUser) : "Unknown Staff";
 
-      const currentUser = window.api.getCurrentUser();
+      const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
       const creatorId = currentUser ? currentUser.user_id : "u-proprietor-1";
 
       const taskId = tid || "task-" + Date.now();
@@ -2222,7 +2224,7 @@ async function renderProprietorDash(container) {
         title.innerText = "Add New Task";
         inputId.value = "";
         inputDesc.value = "";
-        if (inputAssignee.options.length > 0) inputAssignee.selectedIndex = 0;
+        if (inputAssignee && inputAssignee.options && inputAssignee.options.length > 0) inputAssignee.selectedIndex = 0;
       }
       modal.classList.remove("portal-hidden");
     }
@@ -2235,6 +2237,11 @@ async function renderProprietorDash(container) {
 // ==========================================
 // 8.2 HEAD TEACHER PORTAL RENDERER
 // ==========================================
+async function renderSectionalHeadDash(container) {
+  await renderTeacherDash(container);
+}
+window.renderSectionalHeadDash = renderSectionalHeadDash;
+
 async function renderHeadTeacherDash(container) {
   try {
     const teachers = (await window.db.getAll("users")).filter(u => u.role === "Teacher");
@@ -2312,7 +2319,7 @@ async function renderHeadTeacherDash(container) {
     const taskList = document.getElementById("ht-assigned-tasks-list");
     async function renderTasks() {
       const allTasks = await window.db.getAll("staff_tasks");
-      const currentUser = window.api.getCurrentUser();
+      const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
       const myDelegated = allTasks.filter(t => t.assigner_id === currentUser.user_id);
       
       if (myDelegated.length === 0) {
@@ -2353,7 +2360,7 @@ async function renderHeadTeacherDash(container) {
       const targetUser = await window.db.get("users", targetId);
       const targetName = targetUser ? formatFullName(targetUser) : "Unknown Staff";
       
-      const currentUser = window.api.getCurrentUser();
+      const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
       const taskId = "task-" + Date.now();
 
       const taskPayload = {
@@ -2518,7 +2525,7 @@ async function renderFinanceDash(container) {
       }
     }, 100);
 
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     const allTasks = await window.db.getAll("staff_tasks");
     const myTasks = allTasks.filter(t => t.assignee_id === currentUser.user_id && t.status === "PENDING");
     
@@ -3432,7 +3439,7 @@ async function renderAccountProvisioning(container) {
             });
 
             // Update local session if self
-            const currentUser = window.api.getCurrentUser();
+            const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
             if (currentUser && currentUser.user_id === user.user_id) {
               currentUser.role = newRole;
               localStorage.setItem("current_user_token", window.api.generateJWT(currentUser));
@@ -3790,7 +3797,7 @@ async function renderAccountProvisioning(container) {
   document.getElementById("btn-upload-csv").addEventListener("click", async () => {
     const csvBtn = document.getElementById("btn-upload-csv");
     const fileInput = document.getElementById("prov-csv-file");
-    const file = fileInput.files[0];
+    const file = (fileInput && fileInput.files && fileInput.files.length > 0) ? fileInput.files[0] : null;
     if (!file) {
       showToast("Please select a valid CSV file first.", "warning");
       return;
@@ -4902,7 +4909,7 @@ async function renderWebsiteCMS(container) {
       const fileInput = document.getElementById("cms-photo-file");
       const titleInput = document.getElementById("cms-photo-title");
       
-      const files = fileInput.files;
+      const files = (fileInput && fileInput.files) ? fileInput.files : [];
       const baseTitle = sanitizeXSS(titleInput.value || "");
       
       let album = "General";
@@ -5153,7 +5160,7 @@ async function renderWebsiteCMS(container) {
 // ==========================================
 async function renderBroadcastPanel(container) {
   try {
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     const users = await window.db.getAll("users");
     const classes = await window.db.getAll("classes");
     const enrolments = await window.db.getAll("enrolments");
@@ -6316,7 +6323,7 @@ async function renderBroadcastPanel(container) {
 // ==========================================
 async function renderAdmissionsIntake(container) {
   try {
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     const users = await window.db.getAll("users");
     const pendingStudents = users.filter(u => u.status === "PENDING" && u.role === "Student");
     const profiles = await window.db.getAll("profiles");
@@ -6706,7 +6713,7 @@ async function renderFeeLedger(container) {
     const classes = await window.db.getAll("classes") || [];
     const enrolments = await window.db.getAll("enrolments") || [];
     const transactions = await window.db.getAll("financial_transactions") || [];
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
 
     const students = users.filter(u => u.role === "Student" && (u.status === "ACTIVE" || !u.status || u.status === "active"));
 
@@ -7837,7 +7844,7 @@ async function renderFeeLedger(container) {
         }
         requestAnimationFrame(() => {
           setTimeout(() => {
-            window.print();
+            if (typeof window.print === "function") window.print();
           }, 50);
         });
       };
@@ -7915,7 +7922,7 @@ async function renderFeeLedger(container) {
           }
           requestAnimationFrame(() => {
             setTimeout(() => {
-              window.print();
+              if (typeof window.print === "function") window.print();
             }, 50);
           });
         };
@@ -8113,7 +8120,7 @@ async function renderPayrollEngine(container) {
     const classes = await window.db.getAll("classes");
     const profiles = await window.db.getAll("profiles");
     const transactions = await window.db.getAll("financial_transactions");
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
 
     function sortStaffByClassRank(staffList, descending = false) {
       return [...staffList].sort((a, b) => {
@@ -9040,7 +9047,7 @@ async function renderFinancePL(container) {
       const btnExportPdf = document.getElementById("btn-export-finance-pdf");
       if (btnExportPdf) {
         btnExportPdf.onclick = () => {
-          window.print();
+          if (typeof window.print === "function") window.print();
         };
       }
     }, 50);
@@ -9252,8 +9259,11 @@ async function renderFinancialAudit(container) {
 // ==========================================
 async function renderTeacherPayslip(container) {
   try {
-    const profile = (await window.db.getAll("profiles")).find(p => p.user_id === currentUser.user_id) || { base_salary: 0, allowances: 0 };
-    const myTxs = (await window.db.getAll("financial_transactions")).filter(t => t.type === "PAYROLL" && t.reference_no && t.reference_no.includes(currentUser.uid)).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const activeUser = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
+    const userId = activeUser ? activeUser.user_id : "";
+    const userUid = activeUser ? activeUser.uid : "";
+    const profile = (await window.db.getAll("profiles")).find(p => p.user_id === userId) || { base_salary: 0, allowances: 0 };
+    const myTxs = (await window.db.getAll("financial_transactions")).filter(t => t.type === "PAYROLL" && t.reference_no && userUid && t.reference_no.includes(userUid)).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
     const latestPeriod = (myTxs.length > 0 && myTxs[0].pay_period) || (myTxs.length > 0 && myTxs[0].timestamp ? myTxs[0].timestamp.substring(0, 7) : new Date().toISOString().substring(0, 7));
     const payMonthLabel = getPayrollMonthLabel(latestPeriod);
 
@@ -9279,8 +9289,8 @@ async function renderTeacherPayslip(container) {
 
           <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:1.5rem; border-bottom:1px dashed #ccc; padding-bottom:1rem;">
             <div>
-              <div><strong>Name:</strong> ${formatFullName(currentUser)}</div>
-              <div><strong>Staff ID:</strong> ${currentUser.uid}</div>
+              <div><strong>Name:</strong> ${formatFullName(activeUser)}</div>
+              <div><strong>Staff ID:</strong> ${userUid || (activeUser && activeUser.uid) || ""}</div>
             </div>
             <div style="text-align:right;">
               <div><strong>Pay Month:</strong> ${payMonthLabel}</div>
@@ -9341,7 +9351,14 @@ async function renderTeacherPayslip(container) {
 // ==========================================
 async function renderTeacherDash(container) {
   try {
-    const attendance = await window.db.queryByIndex("attendance", "user_id", currentUser.user_id) || []; const classes = await window.db.getAll("classes"); const myClass = classes.find(c => c.class_teacher_id === currentUser.user_id); const myClassName = myClass ? myClass.class_name : "Unassigned Grade"; const teacherAttendance = attendance.filter(a => a.status === "PRESENT"); const totalDays = attendance.length;
+    const activeTeacher = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
+    const teacherId = activeTeacher ? activeTeacher.user_id : "";
+    const attendance = teacherId ? (typeof window.db.queryByIndex === "function" ? (await window.db.queryByIndex("attendance", "user_id", teacherId) || []) : (await window.db.getAll("attendance") || []).filter(a => a.user_id === teacherId)) : [];
+    const classes = await window.db.getAll("classes") || [];
+    const myClass = classes.find(c => c.class_teacher_id === teacherId) || (classes.length > 0 ? classes[0] : null);
+    const myClassName = myClass ? myClass.class_name : "Unassigned Grade";
+    const teacherAttendance = attendance.filter(a => a.status === "PRESENT");
+    const totalDays = attendance.length;
     const ratio = totalDays > 0 ? ((teacherAttendance.length / totalDays) * 100).toFixed(0) : 100;
 
     container.innerHTML = `
@@ -9623,31 +9640,32 @@ async function renderClassWall(container) {
 
     // Determine allowed classes based on strict user assignment and role
     let allowedClasses = [];
-    if (currentUser.role === "Student") {
-      const myEnrol = enrolments.find(e => e.student_id === currentUser.user_id);
+    const activeUser = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
+    if (activeUser && activeUser.role === "Student") {
+      const myEnrol = enrolments.find(e => e.student_id === (activeUser ? activeUser.user_id : ""));
       if (myEnrol) {
         allowedClasses = classes.filter(c => c.class_id === myEnrol.class_id);
       }
       if (allowedClasses.length === 0 && classes.length > 0) {
         allowedClasses = [classes[0]];
       }
-    } else if (currentUser.role === "Parent") {
-      const myChildren = users.filter(u => u.role === "Student" && u.phone === currentUser.phone);
+    } else if (activeUser && activeUser.role === "Parent") {
+      const myChildren = users.filter(u => u.role === "Student" && activeUser.phone && u.phone === activeUser.phone);
       const childClassIds = enrolments.filter(e => myChildren.some(k => k.user_id === e.student_id)).map(e => e.class_id);
       allowedClasses = classes.filter(c => childClassIds.includes(c.class_id));
       if (allowedClasses.length === 0 && classes.length > 0) {
         allowedClasses = [classes[0]];
       }
-    } else if (currentUser.role === "Teacher") {
+    } else if (activeUser && activeUser.role === "Teacher") {
       // Limit teacher strictly to their assigned class
-      const assigned = classes.filter(c => c.class_teacher_id === currentUser.user_id);
+      const assigned = classes.filter(c => c.class_teacher_id === (activeUser ? activeUser.user_id : ""));
       if (assigned.length > 0) {
         allowedClasses = assigned;
       } else {
         allowedClasses = classes.length > 0 ? [classes[0]] : [];
       }
-    } else if (currentUser.role === "SectionalHead") {
-      const myProfile = (await window.db.getAll("profiles") || []).find(p => p.user_id === currentUser.user_id);
+    } else if (activeUser && activeUser.role === "SectionalHead") {
+      const myProfile = (await window.db.getAll("profiles") || []).find(p => p.user_id === (activeUser ? activeUser.user_id : ""));
       const mySection = myProfile && myProfile.section ? myProfile.section.toLowerCase() : "";
       const sectionClasses = classes.filter(c => {
         const cName = (c.class_name || "").toLowerCase();
@@ -9655,7 +9673,7 @@ async function renderClassWall(container) {
         if (mySection === "lower primary" && (cName.includes("primary 1") || cName.includes("primary 2") || cName.includes("primary 3") || cName.includes("class 1") || cName.includes("class 2") || cName.includes("class 3"))) return true;
         if (mySection === "upper primary" && (cName.includes("primary 4") || cName.includes("primary 5") || cName.includes("primary 6") || cName.includes("class 4") || cName.includes("class 5") || cName.includes("class 6"))) return true;
         if (mySection === "jhs" && (cName.includes("jhs") || cName.includes("junior high"))) return true;
-        return c.class_teacher_id === currentUser.user_id;
+        return c.class_teacher_id === (activeUser ? activeUser.user_id : "");
       });
       allowedClasses = sectionClasses.length > 0 ? sectionClasses : classes;
     } else {
@@ -9674,7 +9692,7 @@ async function renderClassWall(container) {
     }
 
     let activeClassId = allowedClasses[0].class_id;
-    const savedClassId = localStorage.getItem(`fja_wall_class_${currentUser.user_id}`);
+    const savedClassId = localStorage.getItem(`fja_wall_class_${activeUser ? activeUser.user_id : 'guest'}`);
     if (savedClassId && allowedClasses.some(c => c.class_id === savedClassId)) {
       activeClassId = savedClassId;
     }
@@ -9728,7 +9746,7 @@ async function renderClassWall(container) {
     if (classSelector) {
       classSelector.addEventListener("change", () => {
         activeClassId = classSelector.value;
-        localStorage.setItem(`fja_wall_class_${currentUser.user_id}`, activeClassId);
+        localStorage.setItem(`fja_wall_class_${activeUser ? activeUser.user_id : 'guest'}`, activeClassId);
         const selectedCls = allowedClasses.find(c => c.class_id === activeClassId);
         const titleEl = document.getElementById("wall-current-class-title");
         if (titleEl && selectedCls) {
@@ -9832,9 +9850,9 @@ async function renderClassWall(container) {
               const replies = JSON.parse(postObj.replies_json || "[]");
               replies.push({
                 reply_id: "rep-" + Date.now(),
-                author_id: currentUser.user_id,
-                author_name: formatFullName(currentUser),
-                author_role: currentUser.role,
+                author_id: activeUser ? activeUser.user_id : "guest",
+                author_name: formatFullName(activeUser),
+                author_role: activeUser ? activeUser.role : "User",
                 content: content,
                 created_at: new Date().toISOString()
               });
@@ -9842,14 +9860,14 @@ async function renderClassWall(container) {
               await window.db.put("class_posts", postObj);
 
               // Notify the topic author if someone else replies
-              if (postObj.author_id && postObj.author_id !== currentUser.user_id) {
+              if (postObj.author_id && postObj.author_id !== (activeUser ? activeUser.user_id : "")) {
                 const notifId = "notif-reply-" + Date.now();
                 await window.db.put("notifications", {
                   notification_id: notifId,
                   role: "ALL",
                   target_user_id: postObj.author_id,
                   title: "New Reply on Class Wall",
-                  message: `${formatFullName(currentUser)} replied to your topic: "${postObj.content.substring(0, 50)}${postObj.content.length > 50 ? '...' : ''}"`,
+                  message: `${formatFullName(activeUser)} replied to your topic: "${postObj.content.substring(0, 50)}${postObj.content.length > 50 ? '...' : ''}"`,
                   target_view: "class-wall",
                   status: "UNREAD",
                   created_at: new Date().toISOString()
@@ -9868,21 +9886,22 @@ async function renderClassWall(container) {
           }
         });
       });
+
+      // Restore wall focus
+      if (focusedReplyId) {
+        const form = document.querySelector('.form-wall-reply[data-post-id="' + focusedReplyId + '"]');
+        if (form) {
+          const input = form.querySelector('.reply-input-text');
+          if (input) {
+            input.value = focusedReplyValue;
+            input.focus();
+          }
+        }
+      }
     }
 
     // Register active wall refresh hook for real-time dbSyncUpdate
-            // Restore wall focus
-        if (focusedReplyId) {
-          const form = document.querySelector('.form-wall-reply[data-post-id="' + focusedReplyId + '"]');
-          if (form) {
-            const input = form.querySelector('.reply-input-text');
-            if (input) {
-              input.value = focusedReplyValue;
-              input.focus();
-            }
-          }
-        }
-      window._refreshActiveWall = loadWallThreads;
+    window._refreshActiveWall = loadWallThreads;
 
     // Hook Topic creation submit
     document.getElementById("form-wall-post").addEventListener("submit", async (e) => {
@@ -9894,9 +9913,9 @@ async function renderClassWall(container) {
         const newPost = {
           post_id: "post-" + Date.now(),
           class_id: activeClassId,
-          author_id: currentUser.user_id,
-          author_name: formatFullName(currentUser),
-          author_role: currentUser.role,
+          author_id: activeUser ? activeUser.user_id : "guest",
+          author_name: formatFullName(activeUser),
+          author_role: activeUser ? activeUser.role : "User",
           content: content,
           replies_json: JSON.stringify([]),
           created_at: new Date().toISOString()
@@ -10125,7 +10144,7 @@ async function renderLessonNoteUpload(container) {
       let attachmentSize = 0;
 
       if (fileInput && fileInput.files && fileInput.files[0]) {
-        const file = fileInput.files[0];
+        const file = (fileInput && fileInput.files && fileInput.files.length > 0) ? fileInput.files[0] : null;
         if (file.size > 12 * 1024 * 1024) {
           showToast("Selected file exceeds 12MB limit. Please attach a smaller file.", "danger");
           return;
@@ -10191,7 +10210,7 @@ async function renderLessonNoteUpload(container) {
 // ==========================================
 async function renderLessonApprovals(container) {
   try {
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
         <div>
@@ -12742,7 +12761,9 @@ async function renderStudentDash(container) {
     const classes = await window.db.getAll("classes") || [];
     const users = await window.db.getAll("users") || [];
 
-    const myEnrol = enrolments.find(e => e.student_id === currentUser.user_id);
+    const activeStudent = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
+    const studentId = activeStudent ? activeStudent.user_id : "";
+    const myEnrol = enrolments.find(e => (e.student_id === studentId || e.user_id === studentId));
     const myClass = myEnrol ? classes.find(c => c.class_id === myEnrol.class_id) : null;
     const myClassName = myClass ? myClass.class_name : "Unassigned Grade";
 
@@ -12752,7 +12773,7 @@ async function renderStudentDash(container) {
       if (t) teacherName = formatFullName(t);
     }
 
-    const myScores = scores.filter(s => s.student_id === currentUser.user_id);
+    const myScores = scores.filter(s => s.student_id === studentId);
     const validMyScores = myScores.map(s => extractValidScore(s)).filter(v => v !== null && !isNaN(v.percentage));
     const avgScore = validMyScores.length > 0 ? (validMyScores.reduce((sum, v) => sum + v.percentage, 0) / validMyScores.length).toFixed(0) : 100;
 
@@ -13008,7 +13029,7 @@ async function renderStudentLearningNotes(container) {
 // 8.22 STUDENT E-LIBRARY & PERSISTENT READER
 // ==========================================
 async function renderStudentLibrary(container) {
-  const currentUser = window.api.getCurrentUser();
+  const activeUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
   const books = await window.db.getAll("elibrary_books");
 
   container.innerHTML = `
@@ -13020,7 +13041,7 @@ async function renderStudentLibrary(container) {
 
       <div class="grid-3" id="library-books-grid">
         ${books.map(b => {
-          const progressKey = `library_progress_${currentUser.user_id}_${b.id}`;
+          const progressKey = `library_progress_${activeUser ? activeUser.user_id : 'guest'}_${b.id}`;
           const curPage = localStorage.getItem(progressKey) || 1;
           return `
             <div class="card" style="display:flex; flex-direction:column; justify-content:space-between; gap:1.25rem;">
@@ -13076,7 +13097,7 @@ async function renderStudentLibrary(container) {
       if (!book) return;
 
       activeBook = book;
-      const progressKey = `library_progress_${currentUser.user_id}_${book.id}`;
+      const progressKey = `library_progress_${activeUser ? activeUser.user_id : 'guest'}_${book.id}`;
       activePage = parseInt(localStorage.getItem(progressKey), 10) || 1;
 
       document.getElementById("reader-book-title").innerText = book.title;
@@ -13111,7 +13132,7 @@ async function renderStudentLibrary(container) {
 
     pageText.innerText = `Page ${activePage} of ${activeBook.pages}`;
 
-    const progressKey = `library_progress_${currentUser.user_id}_${activeBook.id}`;
+    const progressKey = `library_progress_${activeUser ? activeUser.user_id : 'guest'}_${activeBook.id}`;
     localStorage.setItem(progressKey, activePage);
   }
 
@@ -14487,7 +14508,7 @@ async function renderFinanceAccounts(container) {
   try {
     const transactions = await window.db.getAll("financial_transactions");
     const recons = await window.db.getAll("bank_reconciliations");
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
 
     // Centralized institutional cash metrics
     const summary = window.api.getFinancialMetrics(transactions, "all");
@@ -16780,7 +16801,7 @@ async function renderRecordsManagement(container) {
       const userTx = await window.db.getByIndex("financial_transactions", "student_id", userId) || [];
       const allDbSubjects = await window.db.getAll("subjects") || [];
       const subjNameMap = new Map(allDbSubjects.map(s => [s.subject_id, s.subject_name]));
-      const currentUser = window.api.getCurrentUser();
+      const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
 
       // Render Avatar Picture or Initials
       const avatarEl = document.getElementById("profile-avatar");
@@ -18073,7 +18094,8 @@ async function renderProspectusManager(container) {
     }
 
     document.getElementById("btn-print-prospectus").onclick = () => {
-      document.getElementById("print-timestamp").innerText = `Generated on: ${new Date().toLocaleString()} | Scope Filter: ${filterSelect.options[filterSelect.selectedIndex].text}`;
+      const selectedOptionText = (filterSelect && filterSelect.options && filterSelect.selectedIndex >= 0 && filterSelect.options[filterSelect.selectedIndex]) ? filterSelect.options[filterSelect.selectedIndex].text : "All Items";
+      document.getElementById("print-timestamp").innerText = `Generated on: ${new Date().toLocaleString()} | Scope Filter: ${selectedOptionText}`;
       
       const printHeader = document.querySelector(".print-header");
       printHeader.classList.remove("portal-hidden");
@@ -18087,11 +18109,12 @@ async function renderProspectusManager(container) {
           .no-print { display: none !important; }
         }
       `;
-      document.head.appendChild(style);
+      const headEl = document.head || (document.getElementsByTagName && document.getElementsByTagName("head")[0]) || document.body;
+      if (headEl) headEl.appendChild(style);
       
-      window.print();
+      if (typeof window.print === "function") window.print();
       
-      document.head.removeChild(style);
+      if (headEl && style.parentElement === headEl) headEl.removeChild(style);
       printHeader.classList.add("portal-hidden");
     };
 
@@ -18140,7 +18163,7 @@ async function renderProspectusManager(container) {
 // ==========================================
 async function renderBroadcastRequests(container) {
   try {
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     const users = await window.db.getAll("users");
     const classes = await window.db.getAll("classes");
     const enrolments = await window.db.getAll("enrolments");
@@ -18759,7 +18782,8 @@ document.getElementById("form-personal-profile-update").addEventListener("submit
       prof.emergency_contact = JSON.stringify({ name: emerName, phone: emerPhone });
     }
 
-    if (currentUser.role === "Student") {
+    // Check student role
+    if (activeUser && activeUser.role === "Student") {
       const fName = document.getElementById("prof-father-name") ? document.getElementById("prof-father-name").value.trim() : "";
       const fOcc = document.getElementById("prof-father-occupation") ? document.getElementById("prof-father-occupation").value.trim() : "";
       const fPhone = document.getElementById("prof-father-phone") ? document.getElementById("prof-father-phone").value.trim() : "";
@@ -18816,7 +18840,8 @@ document.getElementById("form-personal-profile-update").addEventListener("submit
       photo_url: photoUrl,
       emergency_contact: { name: emerName, phone: emerPhone }
     };
-    if (currentUser.role === "Student") {
+    // Check student role
+    if (activeUser && activeUser.role === "Student") {
       proposed.father_name = document.getElementById("prof-father-name") ? document.getElementById("prof-father-name").value.trim() : "";
       proposed.father_occupation = document.getElementById("prof-father-occupation") ? document.getElementById("prof-father-occupation").value.trim() : "";
       proposed.father_phone = document.getElementById("prof-father-phone") ? document.getElementById("prof-father-phone").value.trim() : "";
@@ -19156,7 +19181,8 @@ async function renderAcademicCalendar(container) {
       cal.events = [];
     }
     
-    const canEditCalendar = ["Proprietor", "HeadTeacher", "Admin"].includes(currentUser.role);
+    const activeUser = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
+    const canEditCalendar = activeUser && ["Proprietor", "HeadTeacher", "Admin"].includes(activeUser.role);
 
     if (!cal.canonical_terms) {
       cal.canonical_terms = {
@@ -20143,8 +20169,8 @@ const enrolments = await window.db.getAll("enrolments");
 const lessonNotes = await window.db.getAll("lesson_notes");
 const scores = await window.db.getAll("student_scores");
 const attendance = await window.db.getAll("attendance");
-const currentUser = window.api.getCurrentUser();
-const isProprietor = currentUser && currentUser.role === "Proprietor";
+const activeUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
+const isProprietor = activeUser && activeUser.role === "Proprietor";
 
 const validStudentIds = new Set(users.filter(u => u.role === "Student" && u.status === "ACTIVE").map(u => u.user_id));
 const validEnrolments = enrolments.filter(e => validStudentIds.has(e.student_id));
@@ -20748,7 +20774,7 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
       const taskList = document.getElementById("prop-assigned-tasks-list");
       async function renderPropTasks() {
         const allTasks = await window.db.getAll("staff_tasks");
-        const myDelegated = allTasks.filter(t => t.assigner_id === currentUser.user_id);
+        const myDelegated = allTasks.filter(t => t.assigner_id === (activeUser ? activeUser.user_id : ""));
         
         if (myDelegated.length === 0) {
           taskList.innerHTML = `<p style="color:var(--text-muted); font-size:0.9rem;">No tasks currently delegated.</p>`;
@@ -20795,7 +20821,7 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
           description: desc,
           assignee_id: targetId,
           assignee_name: targetName,
-          assigner_id: currentUser.user_id,
+          assigner_id: (activeUser ? activeUser.user_id : "admin"),
           status: "PENDING",
           created_at: new Date().toISOString()
         };
@@ -20863,7 +20889,7 @@ document.getElementById("teacher-sms-modal").classList.add("portal-hidden");
                 records.push({
                   attendance_id: attId,
                   user_id: userId,
-                  marked_by: currentUser.user_id,
+                  marked_by: (activeUser ? activeUser.user_id : "admin"),
                   date: dateStr,
                   status: status,
                   academic_year: activeYear,
@@ -20898,9 +20924,9 @@ console.error("Teacher Supervision Panel failed:", err);
 
 async function renderQuestionnairesPortal(container) {
   try {
-    const currentUser = window.api.getCurrentUser();
+    const currentUser = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     const profiles = await window.db.getAll("profiles");
-    const myProfile = profiles.find(p => p.user_id === currentUser.user_id);
+    const myProfile = currentUser ? profiles.find(p => p.user_id === currentUser.user_id) : null;
 
     // Helper function to check if a user is in a target group
     function isUserInTargetGroup(user, userProfile, targetGroup) {
@@ -21008,6 +21034,8 @@ async function renderQuestionnairesPortal(container) {
       const index = questionCounter++;
       const block = document.createElement("div");
       block.className = "quest-question-block";
+      block.setAttribute("data-index", String(index));
+      if (!block.dataset) block.dataset = {};
       block.dataset.index = index;
       block.style.border = "1px solid var(--border-color)";
       block.style.borderRadius = "8px";
@@ -22201,7 +22229,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 // ==========================================
 async function renderParentDash(container) {
   try {
-    if (currentUser.role === "Student") {
+    const activeUser = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
+    if (activeUser && activeUser.role === "Student") {
       // Direct render for the student/parent profile
       container.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:1.5rem;">
@@ -22212,13 +22241,13 @@ async function renderParentDash(container) {
           <div id="parent-child-dashboard-context"></div>
         </div>
       `;
-      renderChildSpecificDetails(currentUser.user_id);
+      renderChildSpecificDetails(activeUser.user_id);
       return;
     }
 
     const users = await window.db.getAll("users");
     // Find children associated with this parent's phone number
-    const children = users.filter(u => u.role === "Student" && u.phone === currentUser.phone);
+    const children = users.filter(u => u.role === "Student" && activeUser && activeUser.phone && u.phone === activeUser.phone);
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
@@ -22253,13 +22282,13 @@ async function renderParentDash(container) {
       
       renderChildSpecificDetails(activeChildId);
       // Cache selection
-      localStorage.setItem(`parent_active_child_${currentUser.user_id}`, activeChildId);
+      localStorage.setItem(`parent_active_child_${activeUser ? activeUser.user_id : 'guest'}`, activeChildId);
     }
 
     selector.addEventListener("change", loadChildDash);
 
     // Load cached selection if available
-    const cached = localStorage.getItem(`parent_active_child_${currentUser.user_id}`);
+    const cached = localStorage.getItem(`parent_active_child_${activeUser ? activeUser.user_id : 'guest'}`);
     if (cached && children.some(c => c.user_id === cached)) {
       selector.value = cached;
     }
@@ -22273,6 +22302,7 @@ async function renderParentDash(container) {
 
 // Child Specific Details inside Parent Portal with sub-tab navigation
 async function renderChildSpecificDetails(studentId) {
+  const activeUser = currentUser || window.currentUser || (window.api && window.api.getCurrentUser());
   const container = document.getElementById("parent-child-dashboard-context");
   if (!container) return;
 
@@ -22308,7 +22338,7 @@ async function renderChildSpecificDetails(studentId) {
       renderChildAttendanceTab(studentId, subContainer);
     }
     
-    localStorage.setItem(`parent_active_subtab_${currentUser.user_id}`, tabId);
+    localStorage.setItem(`parent_active_subtab_${activeUser ? activeUser.user_id : 'guest'}`, tabId);
   }
 
   tabs.forEach(t => {
@@ -22317,7 +22347,7 @@ async function renderChildSpecificDetails(studentId) {
     });
   });
 
-  const cachedSubtab = localStorage.getItem(`parent_active_subtab_${currentUser.user_id}`) || "overview";
+  const cachedSubtab = localStorage.getItem(`parent_active_subtab_${activeUser ? activeUser.user_id : 'guest'}`) || "overview";
   switchTab(cachedSubtab === "dismissal" ? "overview" : cachedSubtab);
 }
 
@@ -22672,7 +22702,7 @@ window.updateNotificationBadge = updateNotificationBadge;
 
 async function renderNotificationsPortal(container) {
   try {
-    const user = window.api.getCurrentUser();
+    const user = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     if (!user) return;
 
     // Auto-purge any stale demo notifications
@@ -22866,7 +22896,7 @@ async function renderNotificationsPortal(container) {
 // ==========================================
 async function renderPortalMessages(container) {
   try {
-    const user = window.api.getCurrentUser();
+    const user = (window.api && window.api.getCurrentUser()) || window.currentUser || currentUser;
     if (!user) return;
 
     const allUsers = await window.db.getAll("users") || [];
@@ -23135,10 +23165,11 @@ function exportElementToPDF(elementId, title) {
   const element = document.getElementById(elementId);
   if (!element) return;
 
-  const clone = element.cloneNode(true);
-  clone.querySelectorAll(".no-print, button, input, select").forEach(el => el.remove());
+  const clone = (typeof element.cloneNode === "function") ? element.cloneNode(true) : element;
+  if (clone && typeof clone.querySelectorAll === "function") clone.querySelectorAll(".no-print, button, input, select").forEach(el => el.remove && el.remove());
 
   const printWindow = window.open('', '_blank');
+  if (!printWindow || !printWindow.document) return;
   printWindow.document.write(`
     <html>
       <head>
@@ -23174,7 +23205,7 @@ function exportElementToPDF(elementId, title) {
         <script>
           window.onload = function() {
             setTimeout(function() {
-              window.print();
+              if (typeof window.print === "function") window.print();
               window.close();
             }, 300);
           };
