@@ -8,6 +8,15 @@ window.escapeHTML = function(str) {
     return chars[tag] || tag;
   });
 };
+const esc = function(str) {
+  if (str === null || str === undefined) return "";
+  if (typeof str !== 'string') return String(str);
+  return str.replace(/[&<>'"]/g, function(tag) {
+    const chars = {'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'};
+    return chars[tag] || tag;
+  });
+};
+window.esc = esc;
 // Centralized Full Name Formatter with complete middle name (other_name) support
 function formatFullName(user) {
   if (!user) return "";
@@ -9447,7 +9456,10 @@ async function renderTeacherAttendance(container) {
     const classes = await window.db.getAll("classes") || [];
     
     // Dynamically look up class assigned to this teacher
-    const myClass = classes.find(c => c.class_teacher_id === currentUser.user_id);
+    const activeTeacher = currentUser || window.currentUser;
+    const currentTeacherId = activeTeacher ? activeTeacher.user_id : "";
+    const isStaffAdmin = activeTeacher && ["admin", "proprietor", "headteacher"].includes(activeTeacher.role);
+    const myClass = classes.find(c => c.class_teacher_id === currentTeacherId) || (isStaffAdmin && classes.length > 0 ? classes[0] : null);
     const myClassName = myClass ? myClass.class_name : "Unassigned Grade";
     const myClassId = myClass ? myClass.class_id : null;
 
@@ -10505,6 +10517,7 @@ async function checkAndAdvanceStudentGrade(studentId, isTeacherPromoted, finalSc
 }
 
 async function renderTeacherGrading(container) {
+  window.renderTeacherGrading = renderTeacherGrading;
   try {
     const classes = await window.db.getAll("classes") || [];
     let dbSubjects = await window.db.getAll("subjects") || [];
@@ -10525,7 +10538,10 @@ async function renderTeacherGrading(container) {
     }
     
     // Dynamically look up class assigned to this teacher
-    const myClass = classes.find(c => c.class_teacher_id === currentUser.user_id);
+    const activeTeacher = currentUser || window.currentUser;
+    const currentTeacherId = activeTeacher ? activeTeacher.user_id : "";
+    const isStaffAdmin = activeTeacher && ["admin", "proprietor", "headteacher"].includes(activeTeacher.role);
+    const myClass = classes.find(c => c.class_teacher_id === currentTeacherId) || (isStaffAdmin && classes.length > 0 ? classes[0] : null);
     const myClassName = myClass ? myClass.class_name : "Unassigned Grade";
     const myClassId = myClass ? myClass.class_id : null;
 
@@ -11054,7 +11070,7 @@ async function renderTeacherGrading(container) {
       if (modalManageSubjects) modalManageSubjects.classList.add("portal-hidden");
     };
     const btnCloseManage = document.getElementById("btn-close-manage-subjects-modal");
-    const btnDoneManage = document.getElementById("btn-done-manage-subjects-btn");
+    const btnDoneManage = document.getElementById("btn-done-manage-subjects-modal") || document.getElementById("btn-done-manage-subjects-btn");
     if (btnCloseManage) btnCloseManage.onclick = hideManageSubjectsModal;
     if (btnDoneManage) btnDoneManage.onclick = hideManageSubjectsModal;
 
@@ -11129,16 +11145,34 @@ async function renderTeacherGrading(container) {
       return [];
     }
 
-    function openExercisesModal() {
-      if (!modalConfigureExercises) return;
-      const subObj = dbSubjects.find(s => s.subject_id === currentSubjectId);
-      const subName = subObj ? subObj.subject_name : "Subject";
-      if (modalExercisesSubtitle) {
-        modalExercisesSubtitle.innerText = `Subject: ${subName} • Class: ${myClassName}`;
+    function hideExercisesModal() {
+      if (modalConfigureExercises) {
+        modalConfigureExercises.classList.add("portal-hidden");
+        modalConfigureExercises.style.display = "none";
       }
+    }
 
-      loadSubjectExercisesConfig(currentSubjectId).then(existingExercises => {
-        let currentExercises = existingExercises.length > 0 ? JSON.parse(JSON.stringify(existingExercises)) : [
+    function showExercisesModal() {
+      if (modalConfigureExercises) {
+        modalConfigureExercises.classList.remove("portal-hidden");
+        modalConfigureExercises.style.display = "flex";
+      }
+    }
+
+    async function openExercisesModal() {
+      if (!modalConfigureExercises) {
+        console.warn("Exercises modal element #modal-configure-exercises not found in DOM");
+        return;
+      }
+      try {
+        const subObj = dbSubjects.find(s => s.subject_id === currentSubjectId);
+        const subName = subObj ? subObj.subject_name : "Subject";
+        if (modalExercisesSubtitle) {
+          modalExercisesSubtitle.innerText = `Subject: ${subName} • Class: ${myClassName}`;
+        }
+
+        const existingExercises = await loadSubjectExercisesConfig(currentSubjectId);
+        let currentExercises = existingExercises && existingExercises.length > 0 ? JSON.parse(JSON.stringify(existingExercises)) : [
           { id: "ex_1", name: "Class Exercise 1", max_score: 20 },
           { id: "ex_2", name: "Class Exercise 2", max_score: 30 },
           { id: "ex_3", name: "Class Test", max_score: 50 }
@@ -11228,7 +11262,7 @@ async function renderTeacherGrading(container) {
             } catch (delErr) {
               console.warn("Delete config error:", delErr);
             }
-            modalConfigureExercises.classList.add("portal-hidden");
+            hideExercisesModal();
             await renderStudentRosterForSubject(currentSubjectId);
             showToast("Continuous grading switched back to single Class Score (Max 50) mode.", "info");
           };
@@ -11262,21 +11296,29 @@ async function renderTeacherGrading(container) {
               updated_at: new Date().toISOString()
             });
 
-            modalConfigureExercises.classList.add("portal-hidden");
+            hideExercisesModal();
             await renderStudentRosterForSubject(currentSubjectId);
             showToast(`Configured ${currentExercises.length} class exercises for ${subName}!`, "success");
           };
         }
 
-        modalConfigureExercises.classList.remove("portal-hidden");
-      });
+        showExercisesModal();
+      } catch (err) {
+        console.error("Error opening exercises modal:", err);
+        showToast("Error opening setup: " + (err.message || err), "danger");
+      }
     }
 
     if (btnCloseExercisesModal) {
-      btnCloseExercisesModal.onclick = () => modalConfigureExercises.classList.add("portal-hidden");
+      btnCloseExercisesModal.onclick = hideExercisesModal;
     }
     if (btnCancelExercisesModal) {
-      btnCancelExercisesModal.onclick = () => modalConfigureExercises.classList.add("portal-hidden");
+      btnCancelExercisesModal.onclick = hideExercisesModal;
+    }
+    if (modalConfigureExercises) {
+      modalConfigureExercises.addEventListener("click", (e) => {
+        if (e.target === modalConfigureExercises) hideExercisesModal();
+      });
     }
     if (btnOpenExercisesModal) {
       btnOpenExercisesModal.onclick = () => openExercisesModal();
@@ -11664,6 +11706,7 @@ async function renderTeacherGrading(container) {
     console.error("Teacher grading view failed:", err);
   }
 }
+window.renderTeacherGrading = renderTeacherGrading;
 
 // ==========================================
 // 8.18 TEACHER ONLINE ASSIGNMENTS CREATOR  
