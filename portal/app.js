@@ -8163,9 +8163,6 @@ async function renderPayrollEngine(container) {
       }
       const role = (member && member.role) || "";
       if (role === "Proprietor") return 1500.00;
-      if (role === "Headmaster" || role === "Administrator") return 500.00;
-      if (role === "Accountant") return 300.00;
-      if (role === "SectionalHead") return 250.00;
       return 0.00;
     }
 
@@ -8316,7 +8313,7 @@ async function renderPayrollEngine(container) {
                 </div>
                 <div class="form-group">
                   <label class="form-label">Duty Allowances (GHS)</label>
-                  <input type="number" id="adj-allowance" class="form-control" placeholder="e.g. 300.00" step="0.01" min="0">
+                  <input type="number" id="adj-allowance" class="form-control" placeholder="e.g. 0.00" step="0.01" min="0">
                 </div>
               </div>
               <div class="horizontal-paired-form">
@@ -17173,8 +17170,8 @@ async function renderRecordsManagement(container) {
           document.getElementById("btn-pm-tab-context").innerText = "💼 Payroll Breakdown";
         }
         
-        const basic = p.base_salary || 2500;
-        const allowance = p.allowances || 300;
+        const basic = (p.base_salary !== undefined && p.base_salary !== null && p.base_salary !== "") ? Number(p.base_salary) : 0;
+        const allowance = (p.allowances !== undefined && p.allowances !== null && p.allowances !== "") ? Number(p.allowances) : 0;
         const payroll = window.api.calculatePayroll(basic, allowance);
         const gross = payroll.gross;
         const ssnit = payroll.ssnit;
@@ -17450,8 +17447,8 @@ async function renderRecordsManagement(container) {
         document.getElementById("edit-rec-staff-role").value = u.role || "Teacher";
         document.getElementById("edit-rec-staff-section").value = p.section || getStaffSection(u, p, freshClasses) || "non-teaching staff";
         document.getElementById("edit-rec-staff-app-date").value = p.appointment_date ? p.appointment_date.split("T")[0] : (p.joining_date ? p.joining_date.split("T")[0] : "2026-08-01");
-        document.getElementById("edit-rec-staff-salary").value = (p.base_salary !== undefined && p.base_salary !== null) ? p.base_salary : 2500;
-        document.getElementById("edit-rec-staff-allowance").value = (p.allowances !== undefined && p.allowances !== null) ? p.allowances : 300;
+        document.getElementById("edit-rec-staff-salary").value = (p.base_salary !== undefined && p.base_salary !== null) ? p.base_salary : 0;
+        document.getElementById("edit-rec-staff-allowance").value = (p.allowances !== undefined && p.allowances !== null) ? p.allowances : 0;
 
         const tClass = freshClasses.find(c => (u.user_id && c.class_teacher_id === u.user_id) || (u.uid && c.class_teacher_id === u.uid));
         document.getElementById("edit-rec-staff-class").value = tClass ? tClass.class_id : "";
