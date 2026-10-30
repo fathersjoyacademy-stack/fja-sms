@@ -6580,7 +6580,8 @@ async function renderAdmissionsIntake(container) {
             let parentUser = allUsers.find(u => u.role === "Parent" && (u.phone === pPhone || (window.api && window.api.normalizeGhanaPhone(u.phone) === normPPhone)));
 
             if (!parentUser) {
-              const pUid = await window.api.generateUID("Parent");
+              const cleanPhoneDigits = (pPhone || "").replace(/\D/g, "");
+              const pUid = cleanPhoneDigits.length >= 9 ? `PAR${cleanPhoneDigits}` : await window.api.generateUID("Parent");
               const pId = "u-parent-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
               const nameParts = pInfo.name.trim().split(" ");
               const pFirst = nameParts[0] || "Parent";

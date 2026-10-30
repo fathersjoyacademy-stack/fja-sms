@@ -556,30 +556,90 @@ const api = {
     }
   },
 
-  // --- Collision-Proof UID Generator ---
+  // --- Collision-Proof Atomic UID Generator (Multi-Device Safe) ---
   async generateUID(role) {
-    if (!window.db) return "SCH-TEMP-0001";
-    
-    const users = await window.db.getAll("users");
     const currentYear = new Date().getFullYear();
-    
-    // Filter matching role UIDs
     const isStudent = role === "Student";
-    const prefix = isStudent ? "FJS" : "FJT"; // FJS = Student, FJT = Staff
-    
-    const roleUsers = users.filter(u => u.uid && u.uid.startsWith(prefix + currentYear));
-    
-    let nextIndex = 1;
-    if (roleUsers.length > 0) {
-      const indices = roleUsers.map(u => {
-        const idxPart = u.uid.replace(prefix + currentYear, "");
-        return parseInt(idxPart, 10) || 0;
-      });
-      nextIndex = Math.max(...indices) + 1;
+    const isParent = role === "Parent";
+    const prefix = isStudent ? "FJS" : (isParent ? "FJP" : "FJT");
+    const seqKey = `${prefix}${currentYear}`;
+
+    // 1. Calculate local max index from all cached IndexedDB users
+    let localMaxIndex = 0;
+    try {
+      if (window.db) {
+        const users = await window.db.getAll("users") || [];
+        const roleUsers = users.filter(u => u.uid && u.uid.startsWith(prefix + currentYear));
+        if (roleUsers.length > 0) {
+          const indices = roleUsers.map(u => {
+            const idxPart = u.uid.replace(prefix + currentYear, "");
+            return parseInt(idxPart, 10) || 0;
+          });
+          localMaxIndex = Math.max(...indices);
+        }
+      }
+    } catch (e) {}
+
+    // Check localStorage high-water mark for this device
+    const storedSeq = parseInt(localStorage.getItem(`fja_local_seq_${seqKey}`) || "0", 10) || 0;
+    const currentLocalMax = Math.max(localMaxIndex, storedSeq);
+
+    // 2. Cloud Firestore Atomic Sequence Allocation
+    if (navigator.onLine && typeof firebase !== "undefined" && firebase.firestore && window.isFirebaseConfigured && window.isFirebaseConfigured()) {
+      try {
+        if (typeof window.ensureFirebaseAuth === "function") {
+          await window.ensureFirebaseAuth();
+        }
+        const firestore = firebase.firestore();
+
+        // Query Firestore directly for the highest UID currently in cloud
+        let cloudMaxIndex = 0;
+        try {
+          const topSnap = await firestore.collection("users")
+            .where("uid", ">=", prefix + currentYear)
+            .where("uid", "<", prefix + (currentYear + 1))
+            .orderBy("uid", "desc")
+            .limit(1)
+            .get();
+          if (!topSnap.empty) {
+            const topUid = topSnap.docs[0].data().uid || "";
+            const numPart = parseInt(topUid.replace(prefix + currentYear, ""), 10);
+            if (!isNaN(numPart) && numPart > 0) {
+              cloudMaxIndex = numPart;
+            }
+          }
+        } catch (qErr) {
+          console.warn("Could not query top cloud UID directly:", qErr);
+        }
+
+        // Run an atomic transaction on settings/uid_sequences
+        const seqRef = firestore.collection("settings").doc("uid_sequences");
+        const assignedIndex = await firestore.runTransaction(async (transaction) => {
+          const seqDoc = await transaction.get(seqRef);
+          let currentSeq = 0;
+          if (seqDoc.exists) {
+            currentSeq = parseInt(seqDoc.data()[seqKey], 10) || 0;
+          }
+          const base = Math.max(currentSeq, cloudMaxIndex, currentLocalMax);
+          const nextVal = base + 1;
+          transaction.set(seqRef, {
+            [seqKey]: nextVal,
+            updated_at: new Date().toISOString()
+          }, { merge: true });
+          return nextVal;
+        });
+
+        localStorage.setItem(`fja_local_seq_${seqKey}`, String(assignedIndex));
+        return `${prefix}${currentYear}${String(assignedIndex).padStart(4, "0")}`;
+      } catch (cloudSeqErr) {
+        console.warn("Cloud sequence allocation notice, falling back to local max:", cloudSeqErr);
+      }
     }
 
-    const padIndex = String(nextIndex).padStart(4, "0");
-    return `${prefix}${currentYear}${padIndex}`;
+    // 3. Offline fallback
+    const fallbackIndex = currentLocalMax + 1;
+    localStorage.setItem(`fja_local_seq_${seqKey}`, String(fallbackIndex));
+    return `${prefix}${currentYear}${String(fallbackIndex).padStart(4, "0")}`;
   },
 
   // --- Single User Provisioning ---

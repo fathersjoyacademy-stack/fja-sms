@@ -709,7 +709,33 @@ const db = {
         const store = transaction.objectStore(storeName);
         const request = store.put(obj);
         request.onsuccess = () => { const res = request.result; resolve(res && res.is_deleted === true ? undefined : res); };
-        request.onerror = () => reject(request.error);
+        request.onerror = (e) => {
+          // If store is users and constraint error occurs on unique UID index:
+          if (storeName === "users" && request.error && request.error.name === "ConstraintError") {
+            try {
+              const idxReq = store.index("uid").get(obj.uid);
+              idxReq.onsuccess = () => {
+                const conflictUser = idxReq.result;
+                if (conflictUser && conflictUser.user_id !== obj.user_id) {
+                  console.warn(`UID collision detected between ${conflictUser.user_id} (${conflictUser.first_name} ${conflictUser.last_name}) and ${obj.user_id} (${obj.first_name} ${obj.last_name}) on UID ${obj.uid}.`);
+                  // If conflict is Ryan carrying stale FJS20260383, resolve by assigning Ryan FJS20260384
+                  if (conflictUser.user_id === "u-at5o5hokc" && conflictUser.uid === "FJS20260383") {
+                    conflictUser.uid = "FJS20260384";
+                    conflictUser.updated_at = new Date().toISOString();
+                    store.put(conflictUser);
+                    store.put(obj);
+                    resolve(obj.user_id);
+                    return;
+                  }
+                }
+                reject(request.error);
+              };
+              idxReq.onerror = () => reject(request.error);
+              return;
+            } catch (err) {}
+          }
+          reject(request.error);
+        };
       });
     });
   },
@@ -2189,6 +2215,18 @@ async function healDatabaseScoresAndProfiles() {
         }
       }
     }
+
+    // Reconcile and self-heal student UID collisions
+    const users = await db.getAll("users");
+    if (users && users.length > 0) {
+      const collidingRyan = users.find(u => u.user_id === "u-at5o5hokc" && u.uid === "FJS20260383");
+      if (collidingRyan) {
+        collidingRyan.uid = "FJS20260384";
+        collidingRyan.updated_at = new Date().toISOString();
+        await db.putLocal("users", collidingRyan);
+        console.log("Database self-healing: Reconciled Ryan Asante Kwarteng Donfeh UID to FJS20260384 in local store.");
+      }
+    }
   } catch (e) {
     console.warn("Database self-healing notice:", e);
   }
@@ -2270,18 +2308,22 @@ async function syncStoreDelta(storeName, newCloudVersion) {
     const snapshot = await query.get();
     if (!snapshot.empty) {
       for (const doc of snapshot.docs) {
-        let docData = doc.data();
-        let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
-        const docId = db.getDocId(storeName, resolvedDocData) || doc.id;
-        resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
-        if (!resolvedDocData) continue;
-        
-        const localDoc = await db.get(storeName, docId);
-        if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
-          continue;
+        try {
+          let docData = doc.data();
+          let resolvedDocData = await assembleFirestoreDoc(storeName, docData);
+          const docId = db.getDocId(storeName, resolvedDocData) || doc.id;
+          resolvedDocData = sanitizeIncomingDoc(storeName, docId, resolvedDocData);
+          if (!resolvedDocData) continue;
+          
+          const localDoc = await db.get(storeName, docId);
+          if (shouldKeepLocalDoc(storeName, docId, localDoc, resolvedDocData)) {
+            continue;
+          }
+          await db.putLocal(storeName, resolvedDocData);
+          window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } }));
+        } catch (itemErr) {
+          console.warn(`Item delta sync error in ${storeName}/${doc.id}:`, itemErr);
         }
-        await db.putLocal(storeName, resolvedDocData);
-        window.dispatchEvent(new CustomEvent("dbSyncUpdate", { detail: { storeName, docData: resolvedDocData } }));
       }
     }
 
