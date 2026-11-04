@@ -935,9 +935,41 @@ const api = {
     return true;
   },
 
-  // --- Regional Payroll Calculator (PAYE & SSNIT - GRA Act 1178 2026 Schedule) ---
-  calculatePayroll(baseSalary, allowances, bonus = 0, advance = 0) {
+  // --- Regional Payroll Calculator (PAYE & SSNIT - GRA Act 1178 2026 Schedule & Contract/Casual WHT) ---
+  calculatePayroll(baseSalary, allowances, bonus = 0, advance = 0, contractType = "permanent") {
+    // Flexible signature support if contractType is passed early
+    if (typeof bonus === "string") {
+      contractType = bonus;
+      bonus = 0;
+      advance = 0;
+    } else if (typeof advance === "string") {
+      contractType = advance;
+      advance = 0;
+    }
+
     const gross = (parseFloat(baseSalary) || 0) + (parseFloat(allowances) || 0) + (parseFloat(bonus) || 0);
+    const isCasual = (typeof contractType === "string" && contractType.trim().toLowerCase() === "casual");
+
+    if (isCasual) {
+      // Casual / Contract Staff:
+      // Keeps base and allowances, does NOT deduct SSNIT or PAYE, but deducts 10% mandatory withholding tax.
+      const withholdingTax = parseFloat((gross * 0.10).toFixed(2));
+      const preNet = gross - withholdingTax;
+      const netPay = parseFloat((preNet - (parseFloat(advance) || 0)).toFixed(2));
+      return {
+        gross: parseFloat(gross.toFixed(2)),
+        ssnit: 0.00,
+        paye: 0.00,
+        withholdingTax: withholdingTax,
+        withholding_tax: withholdingTax,
+        isCasual: true,
+        contractType: "casual",
+        contract_type: "casual",
+        netPay: netPay
+      };
+    }
+
+    // Permanent Staff (GRA Act 1178 Schedule & SSNIT 5.5% Tier 1)
     const ssnit = parseFloat((gross * 0.055).toFixed(2)); // 5.5% employee SSNIT Tier 1 contribution
     
     let remaining = Math.max(0, gross - ssnit);
@@ -995,8 +1027,55 @@ const api = {
       gross: parseFloat(gross.toFixed(2)),
       ssnit: ssnit,
       paye: paye,
+      withholdingTax: 0.00,
+      withholding_tax: 0.00,
+      isCasual: false,
+      contractType: "permanent",
+      contract_type: "permanent",
       netPay: netPay
     };
+  },
+
+  // Toggle Staff Contract Option (Permanent <-> Casual)
+  async toggleStaffContractType(userId) {
+    const user = await window.db.get("users", userId);
+    if (!user) throw new Error("Staff user record not found");
+    const profiles = await window.db.getAll("profiles");
+    let prof = profiles.find(p => p.user_id === userId);
+    const currentContract = (prof && prof.contract_type) || user.contract_type || "permanent";
+    const nextContract = currentContract === "casual" ? "permanent" : "casual";
+
+    if (prof) {
+      prof.contract_type = nextContract;
+      await window.db.put("profiles", prof);
+      if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+        try {
+          await firebase.firestore().collection("profiles").doc(prof.profile_id).set({ contract_type: nextContract }, { merge: true });
+        } catch (e) {}
+      }
+    }
+
+    user.contract_type = nextContract;
+    await window.db.put("users", user);
+    if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && navigator.onLine) {
+      try {
+        await firebase.firestore().collection("users").doc(user.user_id).set({ contract_type: nextContract }, { merge: true });
+      } catch (e) {}
+    }
+
+    // Update in-memory payroll adjustments cache if present
+    if (window.payrollAdjustments) {
+      if (window.payrollAdjustments[userId]) {
+        window.payrollAdjustments[userId].contract_type = nextContract;
+      }
+      Object.keys(window.payrollAdjustments).forEach(period => {
+        if (window.payrollAdjustments[period] && window.payrollAdjustments[period][userId]) {
+          window.payrollAdjustments[period][userId].contract_type = nextContract;
+        }
+      });
+    }
+
+    return { user, profile: prof, contractType: nextContract };
   },
 
   // --- SMS & Communications Engine ---
