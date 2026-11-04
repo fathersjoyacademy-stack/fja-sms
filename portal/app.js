@@ -1607,7 +1607,7 @@ async function renderProprietorPayrollTab(container) {
         const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
         const paidAmount = matchingTx ? matchingTx.amount : 0;
         const contractType = (matchingTx && matchingTx.contract_type) || profile.contract_type || member.contract_type || "permanent";
-        const isCasual = (contractType === "casual");
+        const isContract = (contractType === "contract" || contractType === "casual");
         const basePayroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, 0, 0, contractType);
         const ssnitVal = matchingTx && matchingTx.ssnit !== undefined ? matchingTx.ssnit : basePayroll.ssnit;
         const payeVal = matchingTx && matchingTx.paye !== undefined ? matchingTx.paye : basePayroll.paye;
@@ -1619,16 +1619,16 @@ async function renderProprietorPayrollTab(container) {
             <td>${formatFullName(member)}</td>
             <td><span class="badge badge-info">${member.role}</span></td>
             <td>
-              <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
-                ${isCasual ? 'Casual' : 'Permanent'}
+              <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
+                ${isContract ? 'Contract' : 'Permanent'}
               </span>
             </td>
             <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
             <td>GH¢ ${profile.allowances.toFixed(2)}</td>
             <td><strong>GH¢ ${(matchingTx && matchingTx.gross ? matchingTx.gross : basePayroll.gross).toFixed(2)}</strong></td>
-            <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${ssnitVal.toFixed(2)}`}</td>
-            <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payeVal.toFixed(2)}`}</td>
-            <td>${isCasual ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${whtVal.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+            <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${ssnitVal.toFixed(2)}`}</td>
+            <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payeVal.toFixed(2)}`}</td>
+            <td>${isContract ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${whtVal.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
             <td><strong style="color:var(--accent-success)">GH¢ ${paidAmount.toFixed(2)}</strong></td>
             <td>
               <button class="btn btn-secondary btn-view-history-payslip" data-id="${member.user_id}" data-processed-amt="${paidAmount}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">View Slip</button>
@@ -1657,7 +1657,7 @@ async function renderProprietorPayrollTab(container) {
       let adj = { bonus: 0, advance: 0, narration: "" };
 
       const contractType = (window.payrollAdjustments && window.payrollAdjustments[userId] && window.payrollAdjustments[userId].contract_type) || profile.contract_type || (member && member.contract_type) || "permanent";
-      const isCasual = (contractType === "casual");
+      const isContract = (contractType === "contract" || contractType === "casual");
 
       if (historicalAmt !== null) {
         payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, 0, 0, contractType);
@@ -1682,7 +1682,7 @@ async function renderProprietorPayrollTab(container) {
             <div><strong>Staff Member:</strong> ${formatFullName(member)}</div>
             <div><strong>Roster UID:</strong> ${member.uid}</div>
             <div><strong>Role Scope:</strong> ${member.role}</div>
-            <div><strong>Contract Option:</strong> <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.75rem;">${isCasual ? 'Casual / Contract (10% WHT)' : 'Permanent Staff'}</span></div>
+            <div><strong>Contract Option:</strong> <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.75rem;">${isContract ? 'Contract (10% WHT)' : 'Permanent Staff'}</span></div>
           </div>
           <div style="text-align:right;">
             <div><strong>Advice Date:</strong> ${new Date().toLocaleDateString()}</div>
@@ -1719,7 +1719,7 @@ async function renderProprietorPayrollTab(container) {
               <td></td>
             </tr>
             ` : ""}
-            ${isCasual ? `
+            ${isContract ? `
             <tr style="border-bottom:1px solid #eee;">
               <td style="padding:0.5rem;">Mandatory Withholding Tax (10%)</td>
               <td></td>
@@ -1746,7 +1746,7 @@ async function renderProprietorPayrollTab(container) {
             <tr style="border-bottom:1px solid #eee; color:#ef4444;">
               <td style="padding:0.5rem;">
                 Special Deduction Subtraction
-                ${adj.narration ? `<br><span style="font-size:0.75rem; color:#666;">Note: ${adj.advance}</span>` : ""}
+                ${adj.narration ? `<br><span style="font-size:0.75rem; color:#666;">Note: ${adj.narration}</span>` : ""}
               </td>
               <td></td>
               <td style="padding:0.5rem; text-align:right;">GH¢ ${adj.advance.toFixed(2)}</td>
@@ -1755,7 +1755,7 @@ async function renderProprietorPayrollTab(container) {
             <tr style="border-bottom:2px solid #ddd; background:#fcfcfc; font-weight:bold;">
               <td style="padding:0.5rem;">Total Breakdown Summary</td>
               <td style="padding:0.5rem; text-align:right; color:#065f46;">GH¢ ${payroll.gross.toFixed(2)}</td>
-              <td style="padding:0.5rem; text-align:right; color:#ef4444;">GH¢ ${(isCasual ? (payroll.withholdingTax + adj.advance) : (payroll.ssnit + payroll.paye + adj.advance)).toFixed(2)}</td>
+              <td style="padding:0.5rem; text-align:right; color:#ef4444;">GH¢ ${(isContract ? (payroll.withholdingTax + adj.advance) : (payroll.ssnit + payroll.paye + adj.advance)).toFixed(2)}</td>
             </tr>
           </tbody>
         </table>
@@ -2843,7 +2843,7 @@ async function renderAccountProvisioning(container) {
                   <label class="form-label">Contract / Employment Option</label>
                   <select id="staff-contract-type" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
                     <option value="permanent" selected>Permanent Staff (SSNIT 5.5% & PAYE)</option>
-                    <option value="casual">Casual / Contract (10% Withholding Tax)</option>
+                    <option value="contract">Contract (10% Withholding Tax)</option>
                   </select>
                 </div>
               </div>
@@ -3379,7 +3379,7 @@ async function renderAccountProvisioning(container) {
       listBodyStaff.innerHTML = pagedStaff.items.map(u => {
         const prof = profiles.find(p => p.user_id === u.user_id);
         const section = getStaffSection(u, prof, classes);
-        const isCasual = (u.contract_type === "casual" || (prof && prof.contract_type === "casual"));
+        const isContract = (u.contract_type === "contract" || u.contract_type === "casual" || (prof && (prof.contract_type === "contract" || prof.contract_type === "casual")));
 
         return `
           <tr>
@@ -3388,15 +3388,15 @@ async function renderAccountProvisioning(container) {
             <td>${u.gender || 'Male'}</td>
             <td><span class="badge badge-info">${u.role}</span></td>
             <td>
-              <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.75rem;">
-                ${isCasual ? 'Casual (10% WHT)' : 'Permanent'}
+              <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.75rem;">
+                ${isContract ? 'Contract (10% WHT)' : 'Permanent'}
               </span>
             </td>
             <td>${u.phone}</td>
             <td>${section}</td>
             <td><span class="badge ${u.status === 'ACTIVE' ? 'badge-success' : u.status === 'PENDING_PASSWORD' ? 'badge-warning' : 'badge-danger'}">${u.status}</span></td>
             <td>
-              <button class="btn btn-secondary btn-toggle-staff-contract" data-id="${u.user_id}" data-current="${isCasual ? 'casual' : 'permanent'}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;" title="Switch between Permanent and Casual contract">${isCasual ? '⇄ Make Permanent' : '⇄ Make Casual'}</button>
+              <button class="btn btn-secondary btn-toggle-staff-contract" data-id="${u.user_id}" data-current="${isContract ? 'contract' : 'permanent'}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;" title="Switch between Permanent and Contract">${isContract ? '⇄ Make Permanent' : '⇄ Make Contract'}</button>
               <button class="btn btn-secondary btn-edit-staff-role" data-id="${u.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; border-color:var(--accent-primary); color:var(--accent-primary);">Edit Role</button>
               <button class="btn btn-secondary btn-reset-user" data-id="${u.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">Reset Pass</button>
               <button class="btn btn-secondary btn-archive-user" data-id="${u.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; background:rgba(239,68,68,0.1); border-color:var(--accent-danger); color:var(--accent-danger);">Archive</button>
@@ -3460,10 +3460,11 @@ async function renderAccountProvisioning(container) {
         const user = await window.db.get("users", id);
         if (!user) return;
         const current = btn.getAttribute("data-current") || "permanent";
-        const target = current === "casual" ? "permanent" : "casual";
-        const msg = target === "casual"
-          ? `Toggle ${formatFullName(user)} from Permanent to Casual contract?\n\n• Base salary & allowances will be kept intact\n• SSNIT (5.5%) and PAYE will NOT be deducted (GH¢ 0.00)\n• 10% Mandatory Withholding Tax will be deducted from payout.`
-          : `Toggle ${formatFullName(user)} from Casual back to Permanent contract?\n\n• Standard SSNIT (5.5%) and graduated PAYE tax bands will apply.`;
+        const isCurrentlyContract = (current === "contract" || current === "casual");
+        const target = isCurrentlyContract ? "permanent" : "contract";
+        const msg = target === "contract"
+          ? `Toggle ${formatFullName(user)} from Permanent to Contract?\n\n• Base salary & allowances will be kept intact\n• SSNIT (5.5%) and PAYE will NOT be deducted (GH¢ 0.00)\n• 10% Mandatory Withholding Tax will be deducted from payout.`
+          : `Toggle ${formatFullName(user)} from Contract back to Permanent?\n\n• Standard SSNIT (5.5%) and graduated PAYE tax bands will apply.`;
 
         if (!confirm(msg)) return;
 
@@ -3994,7 +3995,7 @@ async function renderAccountProvisioning(container) {
 
             const genderVal = row.gender ? (row.gender.trim().toLowerCase().startsWith("f") ? "Female" : "Male") : "Male";
 
-            const contractTypeVal = (row.contract_type && row.contract_type.trim().toLowerCase() === "casual") ? "casual" : "permanent";
+            const contractTypeVal = (row.contract_type && (row.contract_type.trim().toLowerCase() === "contract" || row.contract_type.trim().toLowerCase() === "casual")) ? "contract" : "permanent";
             const userPayload = {
               first_name: row.first_name || "Bulk",
               other_name: row.other_name || "",
@@ -8401,7 +8402,7 @@ async function renderPayrollEngine(container) {
                 <label class="form-label">Contract / Employment Option</label>
                 <select id="adj-contract-type" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
                   <option value="permanent">Permanent Staff (SSNIT 5.5% & PAYE)</option>
-                  <option value="casual">Casual / Contract Staff (10% Withholding Tax, No SSNIT/PAYE)</option>
+                  <option value="contract">Contract Staff (10% Withholding Tax, No SSNIT/PAYE)</option>
                 </select>
               </div>
               <div class="horizontal-paired-form">
@@ -8463,7 +8464,7 @@ async function renderPayrollEngine(container) {
           const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
           const paidAmount = matchingTx ? matchingTx.amount : 0;
           const contractType = (matchingTx && matchingTx.contract_type) || profile.contract_type || member.contract_type || "permanent";
-          const isCasual = (contractType === "casual");
+          const isContract = (contractType === "contract" || contractType === "casual");
           const basePayroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, 0, 0, contractType);
 
           const tClasses = classes.filter(c => c.class_teacher_id === member.user_id);
@@ -8480,17 +8481,17 @@ async function renderPayrollEngine(container) {
               <td>${formatFullName(member)}</td>
               <td><span class="badge badge-info">${member.role}</span><br><small style="color:var(--text-secondary); font-size:0.75rem;">${classDesc}</small></td>
               <td>
-                <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
-                  ${isCasual ? 'Casual' : 'Permanent'}
+                <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
+                  ${isContract ? 'Contract' : 'Permanent'}
                 </span>
               </td>
               <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
               <td>GH¢ ${profile.allowances.toFixed(2)}</td>
               <td><em style="color:var(--text-muted);">Processed Logs</em></td>
               <td><strong>GH¢ ${(matchingTx && matchingTx.gross ? matchingTx.gross : basePayroll.gross).toFixed(2)}</strong></td>
-              <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${ssnitVal.toFixed(2)}`}</td>
-              <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payeVal.toFixed(2)}`}</td>
-              <td>${isCasual ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${whtVal.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+              <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${ssnitVal.toFixed(2)}`}</td>
+              <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payeVal.toFixed(2)}`}</td>
+              <td>${isContract ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${whtVal.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
               <td><strong style="color:var(--accent-success)">GH¢ ${paidAmount.toFixed(2)}</strong></td>
               <td>
                 <span class="badge" style="background:#065f46; color:#fff; padding:0.25rem 0.5rem; font-size:0.7rem;">Finalized</span>
@@ -8511,7 +8512,7 @@ async function renderPayrollEngine(container) {
           const effBase = (adj.base_salary !== undefined && adj.base_salary !== null) ? adj.base_salary : profile.base_salary;
           const effAllowance = (adj.allowances !== undefined && adj.allowances !== null) ? adj.allowances : profile.allowances;
           const contractType = adj.contract_type || profile.contract_type || member.contract_type || "permanent";
-          const isCasual = (contractType === "casual");
+          const isContract = (contractType === "contract" || contractType === "casual");
           const payroll = window.api.calculatePayroll(effBase, effAllowance, adj.bonus, adj.advance, contractType);
 
           const tClasses = classes.filter(c => c.class_teacher_id === member.user_id);
@@ -8525,8 +8526,8 @@ async function renderPayrollEngine(container) {
               <td>${formatFullName(member)}</td>
               <td><span class="badge badge-info">${member.role}</span><br><small style="color:var(--text-secondary); font-size:0.75rem;">${classDesc}</small></td>
               <td>
-                <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
-                  ${isCasual ? 'Casual' : 'Permanent'}
+                <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
+                  ${isContract ? 'Contract' : 'Permanent'}
                 </span>
               </td>
               <td>GH¢ ${effBase.toFixed(2)}</td>
@@ -8538,12 +8539,12 @@ async function renderPayrollEngine(container) {
                 </div>
               </td>
               <td><strong>GH¢ ${payroll.gross.toFixed(2)}</strong></td>
-              <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payroll.ssnit.toFixed(2)}`}</td>
-              <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payroll.paye.toFixed(2)}`}</td>
-              <td>${isCasual ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${payroll.withholdingTax.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+              <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payroll.ssnit.toFixed(2)}`}</td>
+              <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payroll.paye.toFixed(2)}`}</td>
+              <td>${isContract ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${payroll.withholdingTax.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
               <td><strong style="color:var(--accent-success)">GH¢ ${payroll.netPay.toFixed(2)}</strong></td>
               <td>
-                <button class="btn btn-secondary btn-quick-toggle-contract" data-id="${member.user_id}" data-current="${isCasual ? 'casual' : 'permanent'}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;" title="Switch between Permanent and Casual contract">${isCasual ? '⇄ Perm' : '⇄ Casual'}</button>
+                <button class="btn btn-secondary btn-quick-toggle-contract" data-id="${member.user_id}" data-current="${isContract ? 'contract' : 'permanent'}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;" title="Switch between Permanent and Contract">${isContract ? '⇄ Perm' : '⇄ Contract'}</button>
                 <button class="btn btn-secondary btn-adjust-salary" data-id="${member.user_id}" data-name="${formatFullName(member)}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem;">Adjust Pay</button>
                 <button class="btn btn-secondary btn-view-payslip" data-id="${member.user_id}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem; margin-left:0.25rem;">View Slip</button>
               </td>
@@ -8568,7 +8569,7 @@ async function renderPayrollEngine(container) {
             document.getElementById("adj-base-salary").value = (currentBase !== undefined && currentBase !== null) ? currentBase : "";
             document.getElementById("adj-allowance").value = (currentAllowance !== undefined && currentAllowance !== null) ? currentAllowance : "";
             if (document.getElementById("adj-contract-type")) {
-              document.getElementById("adj-contract-type").value = currentContract === "casual" ? "casual" : "permanent";
+              document.getElementById("adj-contract-type").value = (currentContract === "contract" || currentContract === "casual") ? "contract" : "permanent";
             }
             document.getElementById("adj-bonus").value = adj.bonus || "";
             document.getElementById("adj-advance").value = adj.advance || "";
@@ -8583,13 +8584,14 @@ async function renderPayrollEngine(container) {
           btn.onclick = async () => {
             const staffId = btn.getAttribute("data-id");
             const current = btn.getAttribute("data-current") || "permanent";
-            const target = current === "casual" ? "permanent" : "casual";
+            const isCurrentlyContract = (current === "contract" || current === "casual");
+            const target = isCurrentlyContract ? "permanent" : "contract";
             const memberObj = staff.find(s => s.user_id === staffId);
             const name = memberObj ? formatFullName(memberObj) : "staff member";
 
-            const msg = target === "casual"
-              ? `Toggle ${name} to Casual contract?\n\n• Base salary & allowances will be kept intact\n• SSNIT (5.5%) and PAYE will NOT be deducted (GH¢ 0.00)\n• 10% Mandatory Withholding Tax will be deducted from payout.`
-              : `Toggle ${name} back to Permanent contract?\n\n• Standard SSNIT (5.5%) and graduated PAYE tax bands will apply.`;
+            const msg = target === "contract"
+              ? `Toggle ${name} to Contract?\n\n• Base salary & allowances will be kept intact\n• SSNIT (5.5%) and PAYE will NOT be deducted (GH¢ 0.00)\n• 10% Mandatory Withholding Tax will be deducted from payout.`
+              : `Toggle ${name} back to Permanent?\n\n• Standard SSNIT (5.5%) and graduated PAYE tax bands will apply.`;
 
             if (!confirm(msg)) return;
 
@@ -8639,7 +8641,7 @@ async function renderPayrollEngine(container) {
         const profile = profiles.find(p => p.user_id === member.user_id) || { base_salary: 0, allowances: 0 };
         const paidAmount = matchingTx ? matchingTx.amount : 0;
         const contractType = (matchingTx && matchingTx.contract_type) || profile.contract_type || member.contract_type || "permanent";
-        const isCasual = (contractType === "casual");
+        const isContract = (contractType === "contract" || contractType === "casual");
         const basePayroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, 0, 0, contractType);
         const ssnitVal = matchingTx && matchingTx.ssnit !== undefined ? matchingTx.ssnit : basePayroll.ssnit;
         const payeVal = matchingTx && matchingTx.paye !== undefined ? matchingTx.paye : basePayroll.paye;
@@ -8651,16 +8653,16 @@ async function renderPayrollEngine(container) {
             <td>${formatFullName(member)}</td>
             <td><span class="badge badge-info">${member.role}</span></td>
             <td>
-              <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
-                ${isCasual ? 'Casual' : 'Permanent'}
+              <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.7rem;">
+                ${isContract ? 'Contract' : 'Permanent'}
               </span>
             </td>
             <td>GH¢ ${profile.base_salary.toFixed(2)}</td>
             <td>GH¢ ${profile.allowances.toFixed(2)}</td>
             <td><strong>GH¢ ${(matchingTx && matchingTx.gross ? matchingTx.gross : basePayroll.gross).toFixed(2)}</strong></td>
-            <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${ssnitVal.toFixed(2)}`}</td>
-            <td>${isCasual ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payeVal.toFixed(2)}`}</td>
-            <td>${isCasual ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${whtVal.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+            <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${ssnitVal.toFixed(2)}`}</td>
+            <td>${isContract ? '<span style="color:var(--text-muted);">0.00</span>' : `GH¢ ${payeVal.toFixed(2)}`}</td>
+            <td>${isContract ? `<span style="color:#ef4444; font-weight:600;">GH¢ ${whtVal.toFixed(2)}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
             <td><strong style="color:var(--accent-success)">GH¢ ${paidAmount.toFixed(2)}</strong></td>
             <td>
               <button class="btn btn-secondary btn-view-history-payslip" data-id="${member.user_id}" data-processed-amt="${paidAmount}" style="min-height:28px; padding:0 0.5rem; font-size:0.75rem;">View Slip</button>
@@ -8754,7 +8756,7 @@ async function renderPayrollEngine(container) {
       const effBase = (adj.base_salary !== undefined && adj.base_salary !== null) ? adj.base_salary : profile.base_salary;
       const effAllowance = (adj.allowances !== undefined && adj.allowances !== null) ? adj.allowances : profile.allowances;
       const contractType = adj.contract_type || profile.contract_type || (member && member.contract_type) || "permanent";
-      const isCasual = (contractType === "casual");
+      const isContract = (contractType === "contract" || contractType === "casual");
 
       if (historicalAmt !== null) {
         payroll = window.api.calculatePayroll(effBase, effAllowance, 0, 0, contractType);
@@ -8814,7 +8816,7 @@ async function renderPayrollEngine(container) {
               <td></td>
             </tr>
             ` : ""}
-            ${isCasual ? `
+            ${isContract ? `
             <tr style="border-bottom:1px solid #eee;">
               <td style="padding:0.5rem;">Mandatory Withholding Tax (10%)</td>
               <td></td>
@@ -8850,7 +8852,7 @@ async function renderPayrollEngine(container) {
             <tr style="border-bottom:2px solid #ddd; background:#fcfcfc; font-weight:bold;">
               <td style="padding:0.5rem;">Total Breakdown Summary</td>
               <td style="padding:0.5rem; text-align:right; color:#065f46;">GH¢ ${payroll.gross.toFixed(2)}</td>
-              <td style="padding:0.5rem; text-align:right; color:#ef4444;">GH¢ ${(isCasual ? (payroll.withholdingTax + adj.advance) : (payroll.ssnit + payroll.paye + adj.advance)).toFixed(2)}</td>
+              <td style="padding:0.5rem; text-align:right; color:#ef4444;">GH¢ ${(isContract ? (payroll.withholdingTax + adj.advance) : (payroll.ssnit + payroll.paye + adj.advance)).toFixed(2)}</td>
             </tr>
           </tbody>
         </table>
@@ -8908,7 +8910,7 @@ async function renderPayrollEngine(container) {
             payment_method: "BANK_TRANSFER",
             reference_no: `PAY-${activePeriod}-${member.uid}`,
             pay_period: activePeriod,
-            billing_description: `Staff Payroll (${payroll.isCasual ? 'Casual' : 'Permanent'}): ${activeMonthLabel}`,
+            billing_description: `Staff Payroll (${payroll.isContract ? 'Contract' : 'Permanent'}): ${activeMonthLabel}`,
             recorded_by: currentUser.user_id,
             timestamp: nowIso,
             contract_type: contractType,
@@ -9437,7 +9439,7 @@ async function renderTeacherPayslip(container) {
     const payMonthLabel = getPayrollMonthLabel(latestPeriod);
 
     const contractType = profile.contract_type || (activeUser && activeUser.contract_type) || "permanent";
-    const isCasual = (contractType === "casual");
+    const isContract = (contractType === "contract" || contractType === "casual");
     const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, 0, 0, contractType);
     if (myTxs.length > 0 && myTxs[0].amount) {
       payroll.netPay = myTxs[0].amount;
@@ -9488,7 +9490,7 @@ async function renderTeacherPayslip(container) {
                 <td style="padding:0.5rem; text-align:right;">GH¢ ${profile.allowances.toFixed(2)}</td>
                 <td></td>
               </tr>
-              ${isCasual ? `
+              ${isContract ? `
               <tr style="border-bottom:1px solid #eee;">
                 <td style="padding:0.5rem;">Mandatory Withholding Tax (10%)</td>
                 <td></td>
@@ -15909,7 +15911,7 @@ async function renderRecordsManagement(container) {
                   <label class="form-label">Contract / Employment Option</label>
                   <select id="edit-rec-staff-contract-type" class="form-control" style="background:var(--bg-primary); border-color:var(--border-color); color:var(--text-primary);">
                     <option value="permanent">Permanent (SSNIT & PAYE)</option>
-                    <option value="casual">Casual (10% Withholding Tax)</option>
+                    <option value="contract">Contract (10% Withholding Tax)</option>
                   </select>
                 </div>
               </div>
@@ -17367,7 +17369,7 @@ async function renderRecordsManagement(container) {
         const basic = (p.base_salary !== undefined && p.base_salary !== null && p.base_salary !== "") ? Number(p.base_salary) : 0;
         const allowance = (p.allowances !== undefined && p.allowances !== null && p.allowances !== "") ? Number(p.allowances) : 0;
         const contractType = p.contract_type || u.contract_type || "permanent";
-        const isCasual = (contractType === "casual");
+        const isContract = (contractType === "contract" || contractType === "casual");
         const payroll = window.api.calculatePayroll(basic, allowance, 0, 0, contractType);
         const gross = payroll.gross;
         const ssnit = payroll.ssnit;
@@ -17379,8 +17381,8 @@ async function renderRecordsManagement(container) {
             <div class="profile-info-pill">
               <span class="pill-label">Contract Option:</span>
               <span class="pill-value">
-                <span class="badge" style="background:${isCasual ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.75rem;">
-                  ${isCasual ? 'Casual (10% Withholding Tax)' : 'Permanent Staff (SSNIT/PAYE)'}
+                <span class="badge" style="background:${isContract ? '#d97706' : '#2563eb'}; color:#fff; font-size:0.75rem;">
+                  ${isContract ? 'Contract (10% Withholding Tax)' : 'Permanent Staff (SSNIT/PAYE)'}
                 </span>
               </span>
             </div>
@@ -17396,7 +17398,7 @@ async function renderRecordsManagement(container) {
               <span class="pill-label">Gross Pay:</span>
               <span class="pill-value">GH¢ ${gross.toFixed(2)}</span>
             </div>
-            ${isCasual ? `
+            ${isContract ? `
             <div class="profile-info-pill">
               <span class="pill-label">SSNIT & PAYE:</span>
               <span class="pill-value" style="color:var(--text-secondary);">Exempt (GH¢ 0.00)</span>
@@ -17665,7 +17667,8 @@ async function renderRecordsManagement(container) {
         document.getElementById("edit-rec-staff-salary").value = (p.base_salary !== undefined && p.base_salary !== null) ? p.base_salary : 0;
         document.getElementById("edit-rec-staff-allowance").value = (p.allowances !== undefined && p.allowances !== null) ? p.allowances : 0;
         if (document.getElementById("edit-rec-staff-contract-type")) {
-          document.getElementById("edit-rec-staff-contract-type").value = (p.contract_type || u.contract_type || "permanent") === "casual" ? "casual" : "permanent";
+          const cType = p.contract_type || u.contract_type || "permanent";
+          document.getElementById("edit-rec-staff-contract-type").value = (cType === "contract" || cType === "casual") ? "contract" : "permanent";
         }
 
         const tClass = freshClasses.find(c => (u.user_id && c.class_teacher_id === u.user_id) || (u.uid && c.class_teacher_id === u.uid));
@@ -18886,7 +18889,7 @@ async function showPayslipModalForSelf(userId, historicalAmt = null, selectedPer
   const profile = profiles.find(p => p.user_id === userId) || { base_salary: 0, allowances: 0 };
 
   const contractType = profile.contract_type || (member && member.contract_type) || "permanent";
-  const isCasual = (contractType === "casual");
+  const isContract = (contractType === "contract" || contractType === "casual");
   const payroll = window.api.calculatePayroll(profile.base_salary, profile.allowances, 0, 0, contractType);
   if (historicalAmt !== null) {
     payroll.netPay = historicalAmt;
@@ -18933,7 +18936,7 @@ async function showPayslipModalForSelf(userId, historicalAmt = null, selectedPer
           <td style="padding:0.5rem; text-align:right;">GH¢ ${profile.allowances.toFixed(2)}</td>
           <td></td>
         </tr>
-        ${isCasual ? `
+        ${isContract ? `
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:0.5rem;">Mandatory Withholding Tax (10%)</td>
           <td></td>

@@ -948,10 +948,11 @@ const api = {
     }
 
     const gross = (parseFloat(baseSalary) || 0) + (parseFloat(allowances) || 0) + (parseFloat(bonus) || 0);
-    const isCasual = (typeof contractType === "string" && contractType.trim().toLowerCase() === "casual");
+    const normalizedType = typeof contractType === "string" ? contractType.trim().toLowerCase() : "";
+    const isContract = (normalizedType === "contract" || normalizedType === "casual");
 
-    if (isCasual) {
-      // Casual / Contract Staff:
+    if (isContract) {
+      // Contract Staff:
       // Keeps base and allowances, does NOT deduct SSNIT or PAYE, but deducts 10% mandatory withholding tax.
       const withholdingTax = parseFloat((gross * 0.10).toFixed(2));
       const preNet = gross - withholdingTax;
@@ -962,9 +963,10 @@ const api = {
         paye: 0.00,
         withholdingTax: withholdingTax,
         withholding_tax: withholdingTax,
+        isContract: true,
         isCasual: true,
-        contractType: "casual",
-        contract_type: "casual",
+        contractType: "contract",
+        contract_type: "contract",
         netPay: netPay
       };
     }
@@ -1043,7 +1045,8 @@ const api = {
     const profiles = await window.db.getAll("profiles");
     let prof = profiles.find(p => p.user_id === userId);
     const currentContract = (prof && prof.contract_type) || user.contract_type || "permanent";
-    const nextContract = currentContract === "casual" ? "permanent" : "casual";
+    const isCurrentlyContract = (currentContract === "contract" || currentContract === "casual");
+    const nextContract = isCurrentlyContract ? "permanent" : "contract";
 
     if (prof) {
       prof.contract_type = nextContract;

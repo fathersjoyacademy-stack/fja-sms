@@ -90,8 +90,8 @@ runTest("2. Explicitly Permanent staff preserves SSNIT and PAYE deductions", () 
 });
 
 // 2. Casual / Contract Option Behavior
-runTest("3. Toggled to Casual: Keeps base and allowances, NO SSNIT, NO PAYE, 10% Withholding Tax", () => {
-  const result = api.calculatePayroll(2500, 300, 0, 200, "casual");
+runTest("3. Toggled to Contract: Keeps base and allowances, NO SSNIT, NO PAYE, 10% Withholding Tax", () => {
+  const result = api.calculatePayroll(2500, 300, 0, 200, "contract");
   // Keeps base (2500) and allowances (300) => Gross = 2800
   assert.strictEqual(result.gross, 2800.00, "Gross must keep base + allowance (2800.00)");
   // Does NOT deduct SSNIT
@@ -102,8 +102,20 @@ runTest("3. Toggled to Casual: Keeps base and allowances, NO SSNIT, NO PAYE, 10%
   assert.strictEqual(result.withholdingTax, 280.00, "Withholding tax must be exactly 10% of gross (280.00)");
   // Net payout = Gross (2800) - Withholding Tax (280) - Advance (200) = 2320.00
   assert.strictEqual(result.netPay, 2320.00, "Net payout must be Gross - 10% WHT - advance (2320.00)");
-  assert.strictEqual(result.isCasual, true, "isCasual flag must be true");
-  assert.strictEqual(result.contractType, "casual", "contractType must be casual");
+  assert.strictEqual(result.isContract, true, "isContract flag must be true");
+  assert.strictEqual(result.isCasual, true, "isCasual flag must be true for backward compatibility");
+  assert.strictEqual(result.contractType, "contract", "contractType must be contract");
+});
+
+runTest("3b. Backward compatibility: passing 'casual' also yields 10% WHT, 0 SSNIT, 0 PAYE", () => {
+  const result = api.calculatePayroll(2500, 300, 0, 200, "casual");
+  assert.strictEqual(result.gross, 2800.00);
+  assert.strictEqual(result.ssnit, 0.00);
+  assert.strictEqual(result.paye, 0.00);
+  assert.strictEqual(result.withholdingTax, 280.00);
+  assert.strictEqual(result.netPay, 2320.00);
+  assert.strictEqual(result.isContract, true);
+  assert.strictEqual(result.contractType, "contract");
 });
 
 runTest("4. Casual staff with only base salary (GH¢ 1,800 base, 0 allowance, 0 adjustments)", () => {
@@ -153,23 +165,23 @@ runTest("6. Flexible signature: calculatePayroll(base, allow, 'casual') correctl
       console.log("[PASS] 7. Unmodified existing record defaults to permanent calculation");
       testsPassed++;
 
-      // 2. Toggle to casual
-      const toggledToCasual = await api.toggleStaffContractType(teacherId);
-      assert.strictEqual(toggledToCasual.contractType, "casual", "Should now be casual");
+      // 2. Toggle to contract
+      const toggledToContract = await api.toggleStaffContractType(teacherId);
+      assert.strictEqual(toggledToContract.contractType, "contract", "Should now be contract");
       
-      const userAfterCasual = await window.db.get("users", teacherId);
-      const profAfterCasual = await window.db.get("profiles", "p-u-teacher-1");
-      assert.strictEqual(userAfterCasual.contract_type, "casual");
-      assert.strictEqual(profAfterCasual.contract_type, "casual");
+      const userAfterContract = await window.db.get("users", teacherId);
+      const profAfterContract = await window.db.get("profiles", "p-u-teacher-1");
+      assert.strictEqual(userAfterContract.contract_type, "contract");
+      assert.strictEqual(profAfterContract.contract_type, "contract");
 
       // Verify calculation after toggle
-      const calcCasual = api.calculatePayroll(profAfterCasual.base_salary, profAfterCasual.allowances, 0, 0, profAfterCasual.contract_type);
-      assert.strictEqual(calcCasual.gross, 2800.00, "Base and allowance preserved intact");
-      assert.strictEqual(calcCasual.ssnit, 0.00, "SSNIT waived");
-      assert.strictEqual(calcCasual.paye, 0.00, "PAYE waived");
-      assert.strictEqual(calcCasual.withholdingTax, 280.00, "10% mandatory withholding tax applied");
-      assert.strictEqual(calcCasual.netPay, 2520.00, "Net is 2800 - 280 = 2520.00");
-      console.log("[PASS] 8. Toggled to Casual: Base & allowances preserved, SSNIT & PAYE 0, 10% WHT deducted");
+      const calcContract = api.calculatePayroll(profAfterContract.base_salary, profAfterContract.allowances, 0, 0, profAfterContract.contract_type);
+      assert.strictEqual(calcContract.gross, 2800.00, "Base and allowance preserved intact");
+      assert.strictEqual(calcContract.ssnit, 0.00, "SSNIT waived");
+      assert.strictEqual(calcContract.paye, 0.00, "PAYE waived");
+      assert.strictEqual(calcContract.withholdingTax, 280.00, "10% mandatory withholding tax applied");
+      assert.strictEqual(calcContract.netPay, 2520.00, "Net is 2800 - 280 = 2520.00");
+      console.log("[PASS] 8. Toggled to Contract: Base & allowances preserved, SSNIT & PAYE 0, 10% WHT deducted");
       testsPassed++;
 
       // 3. Toggle back to permanent
