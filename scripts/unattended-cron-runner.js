@@ -67,6 +67,15 @@ async function main() {
     console.log("\nExecution completed successfully.");
     process.exit(0);
   } catch (err) {
+    if (err.code === 8 || (err.message && err.message.includes("Quota exceeded"))) {
+      console.warn("\n========================================================");
+      console.warn("  FIRESTORE QUOTA NOTICE (Spark Plan: 50,000 reads/day) ");
+      console.warn("========================================================");
+      console.warn("The free tier daily document read limit was reached for today.");
+      console.warn("Firestore automatically resets daily quotas at 00:00 PST (08:00 AM GMT).");
+      console.warn("The unattended runner will resume cleanly at tomorrow's 09:00 AM GMT schedule.");
+      process.exit(0);
+    }
     console.error("FATAL ERROR in Unattended Birthday SMS Runner:", err);
     process.exit(1);
   }

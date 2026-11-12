@@ -1137,26 +1137,48 @@ const api = {
     let gatewayResult = null;
     let gatewayError = null;
 
-    // Dispatch via backend Firebase Cloud Function if online
+    // Dispatch via Cloudflare Worker Gateway or Firebase Functions if online
     if (typeof navigator !== "undefined" && navigator.onLine) {
-      try {
-        if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && typeof firebase.functions === "function") {
-          console.log(`[SMS Client] Dispatching via Firebase Callable sendSchoolSMS to ${normalizedPhone}...`);
-          const sendFn = firebase.functions().httpsCallable("sendSchoolSMS");
-          const resp = await sendFn({ recipientPhone: normalizedPhone, message });
-          gatewayResult = resp.data;
-          console.log(`[SMS Client] Callable response:`, gatewayResult);
+      const projectId = (typeof window !== "undefined" && window.firebaseConfig && window.firebaseConfig.projectId) || "fja-sms";
+      const httpUrl = (typeof window !== "undefined" && window.hubtelConfig && window.hubtelConfig.apiEndpoint) || `https://us-central1-${projectId}.cloudfunctions.net/apiSendSMS`;
+
+      // 1. Primary: Direct Fast Serverless Gateway (Cloudflare Worker)
+      if (httpUrl && httpUrl.includes("workers.dev")) {
+        try {
+          console.log(`[SMS Client] Dispatching via Cloudflare Worker: ${httpUrl} to ${normalizedPhone}...`);
+          const res = await fetch(httpUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ recipientPhone: normalizedPhone, message })
+          });
+          const resData = await res.json().catch(() => null);
+          console.log(`[SMS Client] Cloudflare Worker response:`, resData);
+          if (resData) gatewayResult = resData;
+        } catch (workerErr) {
+          gatewayError = workerErr.message || String(workerErr);
+          console.warn(`[SMS Client] Cloudflare Worker notice:`, gatewayError);
         }
-      } catch (cfErr) {
-        gatewayError = cfErr.message || String(cfErr);
-        console.warn(`[SMS Client] Callable sendSchoolSMS notice (attempting HTTP fallback):`, gatewayError);
       }
 
+      // 2. Secondary fallback: Firebase Callable Function
       if (!gatewayResult) {
         try {
-          const projectId = (typeof window !== "undefined" && window.firebaseConfig && window.firebaseConfig.projectId) || "fja-sms";
-          const httpUrl = `https://us-central1-${projectId}.cloudfunctions.net/apiSendSMS`;
-          console.log(`[SMS Client] Dispatching via HTTP POST endpoint: ${httpUrl}`);
+          if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && typeof firebase.functions === "function") {
+            console.log(`[SMS Client] Dispatching via Firebase Callable sendSchoolSMS to ${normalizedPhone}...`);
+            const sendFn = firebase.functions().httpsCallable("sendSchoolSMS");
+            const resp = await sendFn({ recipientPhone: normalizedPhone, message });
+            gatewayResult = resp.data;
+          }
+        } catch (cfErr) {
+          gatewayError = cfErr.message || String(cfErr);
+        }
+      }
+
+      // 3. Tertiary fallback: Firebase HTTP Function
+      if (!gatewayResult && !httpUrl.includes("workers.dev")) {
+        try {
           const res = await fetch(httpUrl, {
             method: "POST",
             headers: {
@@ -1165,19 +1187,10 @@ const api = {
             },
             body: JSON.stringify({ recipientPhone: normalizedPhone, message })
           });
-
-          console.log(`[SMS Client] Backend HTTP Status: ${res.status} ${res.statusText}`);
           const resData = await res.json().catch(() => null);
-          console.log(`[SMS Client] Backend Response Payload:`, resData);
-
-          if (resData) {
-            gatewayResult = resData;
-          } else {
-            gatewayError = `HTTP ${res.status} error from SMS backend`;
-          }
+          if (resData) gatewayResult = resData;
         } catch (httpErr) {
           gatewayError = httpErr.message || String(httpErr);
-          console.warn("[SMS Client] HTTP fallback dispatch error:", gatewayError);
         }
       }
     } else {

@@ -16,7 +16,7 @@ const firebaseConfig = {
 const hubtelConfig = {
   senderId: "FathersJoy",
   backendFunction: "sendSchoolSMS",
-  apiEndpoint: "https://us-central1-fja-sms.cloudfunctions.net/apiSendSMS"
+  apiEndpoint: "https://fja-sms-gateway.fathersjoyacademy.workers.dev"
 };
 
 // Helper flag to check if Firebase is configured
