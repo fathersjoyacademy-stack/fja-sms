@@ -1135,23 +1135,28 @@ const api = {
     }
 
     let gatewayResult = null;
+    let gatewayError = null;
 
     // Dispatch via backend Firebase Cloud Function if online
-    if (navigator.onLine) {
+    if (typeof navigator !== "undefined" && navigator.onLine) {
       try {
         if (typeof firebase !== "undefined" && firebase.apps && firebase.apps.length > 0 && typeof firebase.functions === "function") {
+          console.log(`[SMS Client] Dispatching via Firebase Callable sendSchoolSMS to ${normalizedPhone}...`);
           const sendFn = firebase.functions().httpsCallable("sendSchoolSMS");
           const resp = await sendFn({ recipientPhone: normalizedPhone, message });
           gatewayResult = resp.data;
+          console.log(`[SMS Client] Callable response:`, gatewayResult);
         }
       } catch (cfErr) {
-        console.warn("Callable sendSchoolSMS notice (attempting HTTP fallback):", cfErr.message || cfErr);
+        gatewayError = cfErr.message || String(cfErr);
+        console.warn(`[SMS Client] Callable sendSchoolSMS notice (attempting HTTP fallback):`, gatewayError);
       }
 
       if (!gatewayResult) {
         try {
-          const projectId = (window.firebaseConfig && window.firebaseConfig.projectId) || "fja-sms";
+          const projectId = (typeof window !== "undefined" && window.firebaseConfig && window.firebaseConfig.projectId) || "fja-sms";
           const httpUrl = `https://us-central1-${projectId}.cloudfunctions.net/apiSendSMS`;
+          console.log(`[SMS Client] Dispatching via HTTP POST endpoint: ${httpUrl}`);
           const res = await fetch(httpUrl, {
             method: "POST",
             headers: {
@@ -1160,28 +1165,49 @@ const api = {
             },
             body: JSON.stringify({ recipientPhone: normalizedPhone, message })
           });
-          if (res.ok || res.status === 400 || res.status === 402) {
-            gatewayResult = await res.json();
+
+          console.log(`[SMS Client] Backend HTTP Status: ${res.status} ${res.statusText}`);
+          const resData = await res.json().catch(() => null);
+          console.log(`[SMS Client] Backend Response Payload:`, resData);
+
+          if (resData) {
+            gatewayResult = resData;
+          } else {
+            gatewayError = `HTTP ${res.status} error from SMS backend`;
           }
         } catch (httpErr) {
-          // Functions uninitialized or running in offline mode
+          gatewayError = httpErr.message || String(httpErr);
+          console.warn("[SMS Client] HTTP fallback dispatch error:", gatewayError);
         }
       }
+    } else {
+      console.warn(`[SMS Client] Device is currently OFFLINE. Queuing SMS for ${normalizedPhone}.`);
+      gatewayError = "Device is offline / No internet connection";
     }
 
-    const isSuccess = gatewayResult ? !!gatewayResult.success : true;
-    let statusDesc = "Delivered (Virtual Gateway)";
+    const isSuccess = gatewayResult ? Boolean(gatewayResult.success) : (typeof navigator !== "undefined" && !navigator.onLine ? false : false);
+    let statusDesc = "SMS Failed to send";
     if (gatewayResult) {
-      if (gatewayResult.statusDescription) {
-        statusDesc = gatewayResult.statusDescription;
-      } else if (gatewayResult.status === 12) {
-        statusDesc = "Hubtel: Payment required on account";
-      } else if (gatewayResult.status === 0) {
-        statusDesc = "Hubtel: Delivered Successfully";
+      if (gatewayResult.success) {
+        statusDesc = gatewayResult.statusDescription || "Hubtel: Delivered Successfully";
+      } else {
+        if (gatewayResult.status === 11) {
+          statusDesc = "Hubtel: Invalid or unapproved Sender ID";
+        } else if (gatewayResult.status === 12) {
+          statusDesc = "Hubtel: Insufficient SMS balance / payment required";
+        } else if (gatewayResult.status === 100) {
+          statusDesc = "Hubtel: Authentication failure (invalid API credentials)";
+        } else if (gatewayResult.status === 1) {
+          statusDesc = "Hubtel: Invalid Recipient Phone Number";
+        } else {
+          statusDesc = gatewayResult.statusDescription || gatewayResult.error || `Hubtel Error (Status ${gatewayResult.status})`;
+        }
       }
+    } else if (gatewayError) {
+      statusDesc = `Backend Error: ${gatewayError}`;
     }
 
-    const formatted = `[SMS GATEWAY] To: ${normalizedPhone} (raw: ${phone}) | Status: ${statusDesc} | Msg: ${message}`;
+    const formatted = `[SMS GATEWAY] To: ${normalizedPhone} (raw: ${phone}) | Success: ${isSuccess} | Status: ${statusDesc} | Msg: ${message}`;
     console.log(formatted);
 
     const queueEntry = {

@@ -22,8 +22,16 @@ jobs:
         run: |
           cd functions && npm install
 
+      - name: Configure Firebase Service Account
+        if: ${{ env.FIREBASE_SERVICE_ACCOUNT != '' }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          echo "$FIREBASE_SERVICE_ACCOUNT" > serviceAccountKey.json
+
       - name: Execute Server-Level Unattended Birthday Dispatch
         env:
+          NODE_PATH: functions/node_modules
           HUBTEL_CLIENT_ID: ${{ secrets.HUBTEL_CLIENT_ID || 'cvnhobyo' }}
           HUBTEL_CLIENT_SECRET: ${{ secrets.HUBTEL_CLIENT_SECRET || 'rnrxvuxd' }}
           HUBTEL_SENDER_ID: ${{ secrets.HUBTEL_SENDER_ID || 'FathersJoy' }}

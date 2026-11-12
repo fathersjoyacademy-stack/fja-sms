@@ -11,6 +11,9 @@ console.log("233244123456 ->", normalizeGhanaPhone("233244123456"));
 
 console.log("\n=== Testing executeDailyBirthdayScan with Mock Firestore ===");
 
+const now = new Date();
+const todayMMDD = (now.getUTCMonth() + 1).toString().padStart(2, "0") + "-" + now.getUTCDate().toString().padStart(2, "0");
+
 const mockUsers = [
   {
     id: "u-teacher-2",
@@ -20,7 +23,7 @@ const mockUsers = [
     role: "Teacher",
     phone: "0244123456",
     status: "ACTIVE",
-    date_of_birth: "1991-09-27" // Match today's test date
+    date_of_birth: "1991-" + todayMMDD // Match today's test date
   },
   {
     id: "u-student-1",
@@ -30,7 +33,7 @@ const mockUsers = [
     role: "Student",
     phone: "", // Missing direct phone -> should resolve parent
     status: "ACTIVE",
-    date_of_birth: "2015-09-27" // Match today's test date
+    date_of_birth: "2015-" + todayMMDD // Match today's test date
   },
   {
     id: "u-headteacher-1",

@@ -39,55 +39,154 @@ const HUBTEL_CONFIG = {
 };
 
 /**
- * Internal helper to dispatch SMS to Hubtel Gateway
+ * Internal helper to dispatch SMS to Hubtel Gateway with exhaustive HTTP status and body logging
  */
 function dispatchHubtelSMS(phone, message) {
   return new Promise((resolve) => {
     const normalizedPhone = normalizeGhanaPhone(phone);
     if (!normalizedPhone || normalizedPhone.length < 10) {
+      console.warn(`[Hubtel SMS Error] Invalid Ghanaian phone number format provided: "${phone}"`);
       return resolve({
         success: false,
+        httpStatusCode: 400,
+        status: -1,
+        statusDescription: "Invalid Ghanaian phone number format",
         error: "Invalid Ghanaian phone number format",
         normalizedPhone
       });
     }
 
-    const encodedContent = encodeURIComponent(message);
-    const url = `${HUBTEL_CONFIG.endpoint}?clientsecret=${HUBTEL_CONFIG.clientSecret}&clientid=${HUBTEL_CONFIG.clientId}&from=${encodeURIComponent(HUBTEL_CONFIG.from)}&to=${normalizedPhone}&content=${encodedContent}`;
+    const payload = JSON.stringify({
+      From: HUBTEL_CONFIG.from,
+      To: normalizedPhone,
+      Content: message,
+      RegisteredDelivery: true
+    });
 
-    https.get(url, (res) => {
+    const authHeader = "Basic " + Buffer.from(`${HUBTEL_CONFIG.clientId}:${HUBTEL_CONFIG.clientSecret}`).toString("base64");
+    
+    console.log(`[Hubtel SMS Dispatch] Initiating POST to ${HUBTEL_CONFIG.endpoint}`);
+    console.log(`[Hubtel SMS Dispatch] Recipient: ${normalizedPhone} | SenderID: "${HUBTEL_CONFIG.from}" | Length: ${message.length} chars`);
+    console.log(`[Hubtel SMS Dispatch] Payload Preview: "${message.substring(0, 80).replace(/\n/g, ' ')}${message.length > 80 ? '...' : ''}"`);
+
+    const urlObj = new URL(HUBTEL_CONFIG.endpoint);
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port || 443,
+      path: urlObj.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authHeader,
+        "Content-Length": Buffer.byteLength(payload)
+      },
+      timeout: 15000 // 15-second network timeout
+    };
+
+    const req = https.request(options, (res) => {
       let data = "";
       res.on("data", chunk => data += chunk);
       res.on("end", () => {
+        const httpStatus = res.statusCode;
+        const httpStatusMsg = res.statusMessage || "";
+        console.log(`[Hubtel SMS Response] HTTP Status: ${httpStatus} ${httpStatusMsg}`);
+        console.log(`[Hubtel SMS Response] Response Headers:`, JSON.stringify(res.headers));
+        console.log(`[Hubtel SMS Response] Raw Body: ${data}`);
+
         try {
           const parsed = JSON.parse(data);
-          // Hubtel Status Code 0 = Success (HTTP status can be 200 or 201 Created)
-          const isSuccess = (res.statusCode === 200 || res.statusCode === 201) && parsed.status === 0;
+          // Hubtel Status Code 0 = Success (HTTP status 200 or 201 Created)
+          const isSuccess = (httpStatus === 200 || httpStatus === 201) && parsed.status === 0;
+
+          // Interpret known Hubtel status codes for clear diagnostics
+          let diagnosticNote = "";
+          switch (parsed.status) {
+            case 0:
+              diagnosticNote = "Request submitted successfully";
+              break;
+            case 1:
+              diagnosticNote = "Invalid recipient phone number or format";
+              break;
+            case 2:
+              diagnosticNote = "Message Undelivered / Expired in SMSC queue";
+              break;
+            case 3:
+              diagnosticNote = "Message Failed / Rejected by Telco";
+              break;
+            case 11:
+              diagnosticNote = `Invalid or unapproved SenderId (${HUBTEL_CONFIG.from}). Telcos rejected this Sender ID.`;
+              break;
+            case 12:
+              diagnosticNote = "Insufficient SMS credits / Payment required on Hubtel account";
+              break;
+            case 100:
+              diagnosticNote = "Authentication failure: ClientSecret does not match ApiKey/ClientId";
+              break;
+            default:
+              diagnosticNote = parsed.statusDescription || `Hubtel gateway returned code ${parsed.status}`;
+          }
+
+          if (isSuccess) {
+            console.log(`[Hubtel SMS SUCCESS] MsgID: ${parsed.messageId} | Rate: ${parsed.rate} | Network: ${parsed.networkId} | Note: ${diagnosticNote}`);
+          } else {
+            console.error(`[Hubtel SMS REJECTED/FAILED] HTTP: ${httpStatus} | Gateway Status: ${parsed.status} | Reason: ${diagnosticNote} | Raw: ${data}`);
+          }
+
           resolve({
             success: isSuccess,
+            httpStatusCode: httpStatus,
             status: parsed.status,
-            statusDescription: parsed.statusDescription || (isSuccess ? "Sent" : "Gateway responded with code " + parsed.status),
+            statusDescription: parsed.statusDescription || diagnosticNote,
             messageId: parsed.messageId || null,
             rate: parsed.rate || 0,
+            networkId: parsed.networkId || null,
+            clientReference: parsed.clientReference || null,
             normalizedPhone,
+            rawResponse: data,
             raw: parsed
           });
-        } catch (e) {
+        } catch (parseErr) {
+          console.error(`[Hubtel SMS Parse Error] HTTP ${httpStatus}: Failed to parse JSON response. Body: ${data}`);
           resolve({
             success: false,
+            httpStatusCode: httpStatus,
+            status: -2,
+            statusDescription: `HTTP ${httpStatus}: Failed to parse Hubtel JSON response`,
             error: "Failed to parse Hubtel JSON response",
             rawResponse: data,
             normalizedPhone
           });
         }
       });
-    }).on("error", (err) => {
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      console.error(`[Hubtel SMS Network Timeout] Request to ${HUBTEL_CONFIG.endpoint} timed out after 15s`);
       resolve({
         success: false,
+        httpStatusCode: 408,
+        status: -3,
+        statusDescription: "Network timeout connecting to Hubtel SMS gateway",
+        error: "Network timeout after 15 seconds",
+        normalizedPhone
+      });
+    });
+
+    req.on("error", (err) => {
+      console.error(`[Hubtel SMS Network Error] Failed to connect to Hubtel: ${err.message}`);
+      resolve({
+        success: false,
+        httpStatusCode: 500,
+        status: -4,
+        statusDescription: `Network error: ${err.message}`,
         error: err.message,
         normalizedPhone
       });
     });
+
+    req.write(payload);
+    req.end();
   });
 }
 
@@ -96,8 +195,12 @@ function dispatchHubtelSMS(phone, message) {
  * Invoked securely from the client web portal via firebase.functions().httpsCallable("sendSchoolSMS")
  */
 exports.sendSchoolSMS = functions.https.onCall(async (data, context) => {
+  const callerUid = context.auth ? context.auth.uid : "ANONYMOUS";
+  console.log(`[sendSchoolSMS Callable] Invoked by caller UID: ${callerUid}`);
+
   // Ensure the caller is authenticated
   if (!context.auth) {
+    console.warn(`[sendSchoolSMS 401] Rejected unauthenticated caller.`);
     throw new functions.https.HttpsError("unauthenticated", "Authentication required. You must be signed into Father's Joy Academy portal to dispatch SMS.");
   }
 
@@ -106,7 +209,9 @@ exports.sendSchoolSMS = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("invalid-argument", "recipientPhone and message are required.");
   }
 
+  console.log(`[sendSchoolSMS] Dispatching to ${recipientPhone} from caller ${callerUid}`);
   const result = await dispatchHubtelSMS(recipientPhone, message);
+  console.log(`[sendSchoolSMS Result] Caller: ${callerUid} | Phone: ${recipientPhone} | Success: ${result.success} | HTTP: ${result.httpStatusCode} | Status: ${result.status} | Description: ${result.statusDescription}`);
   return result;
 });
 
@@ -130,6 +235,7 @@ exports.apiSendSMS = functions.https.onRequest(async (req, res) => {
   const isAuthorized = (authHeader && authHeader.startsWith("Bearer ") && authHeader.substring(7) === expectedKey) || (apiKey === expectedKey);
   
   if (!isAuthorized) {
+    console.warn(`[apiSendSMS 401 Unauthorized] Invalid or missing API key from IP: ${req.ip}`);
     return res.status(401).json({
       success: false,
       error: "Unauthorized: Valid Authorization header or X-API-Key required to dispatch SMS."
@@ -140,14 +246,19 @@ exports.apiSendSMS = functions.https.onRequest(async (req, res) => {
   const message = req.body?.message || req.query?.content || req.body?.content;
 
   if (!phone || !message) {
+    console.warn(`[apiSendSMS 400 Bad Request] Missing parameters: phone=${phone}, messageLength=${message ? message.length : 0}`);
     return res.status(400).json({
       success: false,
       error: "Missing required parameters: 'recipientPhone' (or 'to') and 'message' (or 'content')"
     });
   }
 
+  console.log(`[apiSendSMS Request] Dispatching SMS to ${phone} (Message length: ${message.length} chars)`);
   const result = await dispatchHubtelSMS(phone, message);
-  return res.status(result.success ? 200 : (result.status === 12 ? 402 : 400)).json(result);
+  console.log(`[apiSendSMS Result] Success: ${result.success} | HTTP: ${result.httpStatusCode} | HubtelStatus: ${result.status} | MsgId: ${result.messageId}`);
+  
+  const returnCode = result.success ? 200 : (result.httpStatusCode || (result.status === 12 ? 402 : 400));
+  return res.status(returnCode).json(result);
 });
 
 /**
@@ -371,6 +482,7 @@ async function executeDailyBirthdayScan(db, options = {}) {
         phone_source: phoneSource,
         message: personalizedMsg,
         status: "SENT",
+        http_status: dispatchRes.httpStatusCode,
         hubtel_status: dispatchRes.status,
         hubtel_message_id: dispatchRes.messageId || null,
         dispatched_at: admin.firestore.FieldValue.serverTimestamp(),
@@ -389,6 +501,8 @@ async function executeDailyBirthdayScan(db, options = {}) {
           phone_source: phoneSource,
           message: personalizedMsg,
           status: "DELIVERED",
+          http_status: dispatchRes.httpStatusCode,
+          hubtel_status: dispatchRes.status,
           message_id: dispatchRes.messageId || null,
           automated: true,
           trigger: triggerType,
@@ -409,6 +523,8 @@ async function executeDailyBirthdayScan(db, options = {}) {
       });
     } else {
       failedCount++;
+      console.error(`[Birthday Scan SMS Failed] Celebrant: ${celebrant.user_id} (${fullName}) | Phone: ${targetPhone} | HTTP Status: ${dispatchRes.httpStatusCode} | Hubtel Status: ${dispatchRes.status} | Reason: ${dispatchRes.statusDescription || dispatchRes.error} | Raw: ${dispatchRes.rawResponse || ""}`);
+
       await dispatchRef.set({
         dispatch_id: dispatchDocId,
         date: todayDateStr,
@@ -419,10 +535,37 @@ async function executeDailyBirthdayScan(db, options = {}) {
         phone: targetPhone,
         message: personalizedMsg,
         status: "FAILED_GATEWAY",
+        http_status: dispatchRes.httpStatusCode,
+        hubtel_status: dispatchRes.status,
         error: dispatchRes.error || dispatchRes.statusDescription,
+        raw_response: dispatchRes.rawResponse || null,
         dispatched_at: admin.firestore.FieldValue.serverTimestamp(),
         trigger: triggerType
       }, { merge: true });
+
+      // Audit Log: Record failure in central sms_logs so administrators can troubleshoot
+      try {
+        await db.collection("sms_logs").add({
+          type: "BIRTHDAY_GREETING",
+          recipient_id: celebrant.user_id,
+          recipient_name: fullName,
+          recipient_role: celebrant.role,
+          is_staff: isStaff,
+          phone: targetPhone,
+          phone_source: phoneSource,
+          message: personalizedMsg,
+          status: "FAILED",
+          http_status: dispatchRes.httpStatusCode,
+          hubtel_status: dispatchRes.status,
+          error: dispatchRes.error || dispatchRes.statusDescription,
+          raw_response: dispatchRes.rawResponse || null,
+          automated: true,
+          trigger: triggerType,
+          dispatched_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (logErr) {
+        console.warn("[Birthday Scan] Error logging failure to sms_logs:", logErr.message);
+      }
 
       results.push({
         userId: celebrant.user_id,
@@ -431,6 +574,8 @@ async function executeDailyBirthdayScan(db, options = {}) {
         isStaff,
         phone: targetPhone,
         status: "FAILED",
+        httpStatus: dispatchRes.httpStatusCode,
+        hubtelStatus: dispatchRes.status,
         error: dispatchRes.error || dispatchRes.statusDescription
       });
     }
