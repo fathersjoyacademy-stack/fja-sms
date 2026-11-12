@@ -8,6 +8,28 @@
 const admin = require("firebase-admin");
 const path = require("path");
 const fs = require("fs");
+
+// Initialize Firebase Admin with service account credentials before loading application modules
+const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, "../serviceAccountKey.json");
+if (fs.existsSync(serviceAccountPath)) {
+  console.log(`Loading service account credentials from: ${serviceAccountPath}`);
+  const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
+  if (admin.apps.length > 0) {
+    admin.app().delete();
+  }
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: serviceAccount.project_id || "fja-sms"
+  });
+} else {
+  console.log("No serviceAccountKey.json detected. Initializing with default project 'fja-sms'...");
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      projectId: process.env.GCLOUD_PROJECT || "fja-sms"
+    });
+  }
+}
+
 const { executeDailyBirthdayScan } = require("../functions/index.js");
 
 async function main() {
@@ -15,24 +37,6 @@ async function main() {
   console.log("  Father's Joy Academy - Unattended Birthday SMS Runner  ");
   console.log("  Schedule: Fixed 09:00 AM GMT Everyday (Africa/Accra)  ");
   console.log("========================================================");
-
-  // Initialize Firebase Admin if not already initialized
-  if (!admin.apps.length) {
-    const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, "../serviceAccountKey.json");
-    if (fs.existsSync(serviceAccountPath)) {
-      console.log(`Loading service account credentials from: ${serviceAccountPath}`);
-      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id || "fja-sms"
-      });
-    } else {
-      console.log("Initializing Firebase Admin with default project 'fja-sms'...");
-      admin.initializeApp({
-        projectId: "fja-sms"
-      });
-    }
-  }
 
   const db = admin.firestore();
   console.log("Connected to Firestore. Starting daily celebrants scan...");

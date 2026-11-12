@@ -1,9 +1,26 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const https = require("https");
+const fs = require("fs");
+const path = require("path");
 
 if (!admin.apps.length) {
-  admin.initializeApp();
+  const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, "../serviceAccountKey.json");
+  if (fs.existsSync(serviceAccountPath)) {
+    try {
+      const sa = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
+      admin.initializeApp({
+        credential: admin.credential.cert(sa),
+        projectId: sa.project_id || "fja-sms"
+      });
+    } catch (e) {
+      admin.initializeApp({ projectId: "fja-sms" });
+    }
+  } else {
+    admin.initializeApp({
+      projectId: process.env.GCLOUD_PROJECT || "fja-sms"
+    });
+  }
 }
 
 /**
