@@ -347,42 +347,78 @@ async function executeDailyBirthdayScan(db, options = {}) {
     };
   }
 
-  // Pre-load parent relations, parent profiles, and general profiles for parent contact resolution
+  // Pre-load parent relations ONLY for students who actually lack a direct phone number
+  // Concurrency and Quota Optimization: Avoids bulk downloading 3 entire collections on every daily run
+  const studentsNeedingParents = celebrants.filter(c => c.role === "Student" && !c.phone);
+
   let parentRelMap = {};
   let parentPhoneMap = {};
   let emergencyPhoneMap = {};
 
-  try {
-    const relSnap = await db.collection("parent_student_relations").get();
-    relSnap.forEach(doc => {
-      const r = doc.data();
-      if (r && r.student_id && r.parent_id) {
-        if (!parentRelMap[r.student_id] || r.is_primary) {
-          parentRelMap[r.student_id] = r.parent_id;
+  if (studentsNeedingParents.length > 0) {
+    try {
+      const targetStudentIds = new Set(studentsNeedingParents.map(s => s.user_id));
+      const relCollection = db.collection("parent_student_relations");
+
+      if (typeof relCollection.where === "function") {
+        for (const st of studentsNeedingParents) {
+          const relSnap = await relCollection.where("student_id", "==", st.user_id).get();
+          if (relSnap && !relSnap.empty) {
+            relSnap.forEach(doc => {
+              const r = doc.data();
+              if (r && r.parent_id && (!parentRelMap[st.user_id] || r.is_primary)) {
+                parentRelMap[st.user_id] = r.parent_id;
+              }
+            });
+          }
         }
+      } else {
+        // Fallback for mock environments
+        const relSnap = await relCollection.get();
+        relSnap.forEach(doc => {
+          const r = doc.data();
+          if (r && r.student_id && r.parent_id && targetStudentIds.has(r.student_id)) {
+            if (!parentRelMap[r.student_id] || r.is_primary) {
+              parentRelMap[r.student_id] = r.parent_id;
+            }
+          }
+        });
       }
-    });
 
-    const parentSnap = await db.collection("parent_profiles").get();
-    parentSnap.forEach(doc => {
-      const p = doc.data();
-      if (p && p.parent_id && p.phone) {
-        parentPhoneMap[p.parent_id] = p.phone;
-      }
-    });
-
-    const profSnap = await db.collection("profiles").get();
-    profSnap.forEach(doc => {
-      const pr = doc.data();
-      if (pr && pr.user_id && pr.emergency_contact) {
+      // Fetch only the specific parent profiles identified
+      const neededParentIds = new Set(Object.values(parentRelMap));
+      for (const pId of neededParentIds) {
         try {
-          const em = typeof pr.emergency_contact === "string" ? JSON.parse(pr.emergency_contact) : pr.emergency_contact;
-          if (em && em.phone) emergencyPhoneMap[pr.user_id] = em.phone;
+          const pDoc = await db.collection("parent_profiles").doc(pId).get();
+          if (pDoc && pDoc.exists && pDoc.data() && pDoc.data().phone) {
+            parentPhoneMap[pId] = pDoc.data().phone;
+          } else {
+            const pSnap = await db.collection("parent_profiles").get();
+            pSnap.forEach(doc => {
+              const p = doc.data();
+              if (p && (p.parent_id === pId || doc.id === pId) && p.phone) {
+                parentPhoneMap[pId] = p.phone;
+              }
+            });
+          }
         } catch (e) {}
       }
-    });
-  } catch (err) {
-    console.warn("[Birthday Scan] Notice: Non-critical issue reading parent relations:", err.message);
+
+      // Fallback to student profile emergency contact for any student still missing a parent phone
+      for (const st of studentsNeedingParents) {
+        if (!parentRelMap[st.user_id]) {
+          try {
+            const profDoc = await db.collection("profiles").doc(st.user_id).get();
+            if (profDoc && profDoc.exists && profDoc.data() && profDoc.data().emergency_contact) {
+              const em = typeof profDoc.data().emergency_contact === "string" ? JSON.parse(profDoc.data().emergency_contact) : profDoc.data().emergency_contact;
+              if (em && em.phone) emergencyPhoneMap[st.user_id] = em.phone;
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (err) {
+      console.warn("[Birthday Scan] Notice: Non-critical issue reading parent relations:", err.message);
+    }
   }
 
   // Optional custom template from Firestore settings
